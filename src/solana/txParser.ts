@@ -1,6 +1,33 @@
-import { Connection, TokenBalance } from "@solana/web3.js";
+import { Connection, ParsedTransactionWithMeta, TokenBalance } from "@solana/web3.js";
 import { SwapEvent, SOL_MINT } from "../types";
 import { logger } from "../logger";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * getTransaction/getParsedTransaction only serve "confirmed" or "finalized" data. Since we now
+ * subscribe to logs at "processed" commitment for lower latency, the transaction can briefly be
+ * unavailable at "confirmed" right after the notification fires - retry a few times instead of
+ * treating that race as a miss.
+ */
+async function fetchConfirmedTransaction(
+  connection: Connection,
+  signature: string,
+  attempts = 8,
+  delayMs = 250
+): Promise<ParsedTransactionWithMeta | null> {
+  for (let i = 0; i < attempts; i++) {
+    const tx = await connection.getParsedTransaction(signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    });
+    if (tx) return tx;
+    await sleep(delayMs);
+  }
+  return null;
+}
 
 interface TokenBalanceEntry {
   mint: string;
@@ -38,12 +65,13 @@ export async function parseSwapForWallet(
   signature: string,
   owner: string
 ): Promise<SwapEvent | null> {
-  const tx = await connection.getParsedTransaction(signature, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
+  const tx = await fetchConfirmedTransaction(connection, signature);
 
-  if (!tx || !tx.meta || tx.meta.err) return null;
+  if (!tx) {
+    logger.warn(`Gave up waiting for tx ${signature} to become available at "confirmed" commitment.`);
+    return null;
+  }
+  if (!tx.meta || tx.meta.err) return null;
 
   const accountKeys = tx.transaction.message.accountKeys;
   const ownerIndex = accountKeys.findIndex((a) => a.pubkey.toBase58() === owner);

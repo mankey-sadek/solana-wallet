@@ -10,7 +10,11 @@ Target wallet in this setup (from the gmgn.ai link): `Cw9YHB19L6hdiCBaF9sXPAQNp9
 
 1. **Monitor** (`src/solana/walletMonitor.ts`): subscribes to the target wallet's transaction logs
    directly over a Solana RPC websocket (`logsSubscribe`) — no scraping of gmgn.ai, all data comes
-   straight from the chain.
+   straight from the chain. The subscription uses `processed` commitment (fires as soon as a leader
+   accepts the tx) instead of `confirmed`, trading a small amount of certainty for lower detection
+   latency; `txParser` retries fetching the full transaction at `confirmed` commitment for a couple
+   seconds to cover the race between the two commitment levels. Jupiter's automatic priority fee
+   (`prioritizationFeeLamports: "auto"`) is enabled on our own swaps so they land quickly too.
 2. **Parse** (`src/solana/txParser.ts`): for each confirmed transaction, diffs the target wallet's
    pre/post SOL and SPL-token balances to detect a plain SOL↔token swap (buy or sell). Token↔token or
    multi-mint transactions are skipped for safety rather than guessed at.

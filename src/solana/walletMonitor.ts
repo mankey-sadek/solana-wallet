@@ -30,7 +30,9 @@ export function watchWallet(connection: Connection, walletAddress: string, onSwa
         })
         .catch((err) => logger.error("Unexpected error in swap queue:", err));
     },
-    "confirmed"
+    // "processed" fires as soon as a leader accepts the tx, well before "confirmed" - the tx
+    // fetch in txParser retries until the data is available at "confirmed" commitment.
+    "processed"
   );
 
   logger.info(`Subscribed to logs for ${walletAddress} (subscription id ${subscriptionId})`);
