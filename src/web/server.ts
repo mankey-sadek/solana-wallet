@@ -5,9 +5,16 @@ import { logger } from "../logger";
 import { PositionStore } from "../state/positionStore";
 import { eventLog } from "../state/eventLog";
 import { Executor } from "../trading/executor";
+import { MonitorManager } from "../solana/monitorManager";
 
-export function startDashboard(executor: Executor, positions: PositionStore, startedAt: Date): void {
+export function startDashboard(
+  executor: Executor,
+  positions: PositionStore,
+  monitor: MonitorManager,
+  startedAt: Date
+): void {
   const app = express();
+  app.use(express.json());
 
   app.get("/api/status", async (_req, res) => {
     let ourSolBalance: number | null = null;
@@ -20,7 +27,7 @@ export function startDashboard(executor: Executor, positions: PositionStore, sta
     }
     res.json({
       mode: config.mode,
-      targetWallet: config.targetWallet,
+      targetWallet: monitor.targetWallet,
       walletAddress: config.mode === "live" ? executor.publicKeyBase58 : null,
       copyRatio: config.copyRatio,
       minTradeSol: config.minTradeSol,
@@ -39,6 +46,27 @@ export function startDashboard(executor: Executor, positions: PositionStore, sta
   app.get("/api/events", (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 300);
     res.json(eventLog.recent(limit));
+  });
+
+  app.post("/api/target-wallet", async (req, res) => {
+    const address = typeof req.body?.address === "string" ? req.body.address : "";
+    if (!address.trim()) {
+      res.status(400).json({ error: "لازم تدخل عنوان محفظة" });
+      return;
+    }
+    try {
+      const targetWallet = await monitor.setTarget(address);
+      const openPositions = positions.all().length;
+      res.json({
+        targetWallet,
+        note:
+          openPositions > 0
+            ? `عندك ${openPositions} مركز مفتوح من قبل التبديل - لسه متابع، لكن هيتقفل بس لو المحفظة الجديدة تداولت نفس التوكن، أو تقفله يدويًا.`
+            : undefined,
+      });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
   });
 
   app.use(express.static(path.join(__dirname, "public")));

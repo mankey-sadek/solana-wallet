@@ -40,8 +40,15 @@ While the bot is running (`npm run dev` / `npm start`) it also serves a live mon
 - open positions (`data/positions.json`) in a table
 - a live feed of detected swaps, copy buys/sells, skips, and errors (polls every 3s)
 
-It's read-only — a way to watch the bot, not control it. Open the URL in any browser on the same
-machine while the bot is running.
+Open the URL in any browser on the same machine while the bot is running.
+
+**Switching the target wallet**: the dashboard has a field to switch which wallet is being copied,
+without restarting the bot. It validates the address, unsubscribes from the old wallet, subscribes to
+the new one, and persists the choice to `data/runtime-config.json` (survives restarts; takes priority
+over `TARGET_WALLET` in `.env` once set). Any position opened while copying the previous wallet stays
+tracked as-is — switching doesn't auto-close it, since that position was mirroring trades of a wallet
+the bot is no longer watching. Close it manually (e.g. sell via a wallet app) if you don't want to hold
+it, or switch back to the original wallet so its sells continue to be mirrored.
 
 ## Setup
 

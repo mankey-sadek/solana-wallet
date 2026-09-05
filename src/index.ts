@@ -1,16 +1,19 @@
 import { config } from "./config";
 import { logger } from "./logger";
 import { createConnection } from "./solana/connection";
-import { watchWallet } from "./solana/walletMonitor";
+import { MonitorManager } from "./solana/monitorManager";
 import { Executor } from "./trading/executor";
 import { CopyTrader } from "./trading/copyTrader";
 import { PositionStore } from "./state/positionStore";
+import { runtimeConfig } from "./state/runtimeConfig";
 import { startDashboard } from "./web/server";
 
 async function main() {
+  const initialTargetWallet = runtimeConfig.get().targetWallet ?? config.targetWallet;
+
   logger.info("=== Solana Copy-Trading Bot ===");
   logger.info(`Mode: ${config.mode.toUpperCase()}`);
-  logger.info(`Target wallet: ${config.targetWallet}`);
+  logger.info(`Target wallet: ${initialTargetWallet}`);
   logger.info(`Copy ratio: ${config.copyRatio} (relative to target's balance-% per trade)`);
 
   if (config.mode === "live") {
@@ -30,9 +33,10 @@ async function main() {
     logger.info(`Loaded ${openPositions.length} open position(s) from previous run.`);
   }
 
-  watchWallet(connection, config.targetWallet, (event) => copyTrader.onSwap(event));
+  const monitor = new MonitorManager(connection, (event) => copyTrader.onSwap(event), initialTargetWallet);
+  monitor.start();
 
-  startDashboard(executor, positions, new Date());
+  startDashboard(executor, positions, monitor, new Date());
 
   logger.info("Listening for target wallet activity... (Ctrl+C to stop)");
 }
