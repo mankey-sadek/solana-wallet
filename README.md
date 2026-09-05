@@ -32,6 +32,12 @@ transactions were real swaps. A wallet worth copying should show up mostly `SWAP
 (e.g. tens per day, not thousands) — that's also roughly how many `getParsedTransaction` calls per day
 the live bot will cost you against your RPC provider's quota if you switch to it.
 
+**Fixed-stake bot check**: a high `SWAP` ratio alone isn't enough — a "spray" bot that buys every new
+token launch with the same stake size produces genuine two-sided swaps too, just not discretionary
+ones. Every scan also buckets each swap's SOL amount to the nearest ~0.01 SOL and flags wallets where
+20%+ of swaps cluster around the same stake size as a likely spray bot rather than a real trader, even
+if its raw swap ratio looks clean.
+
 ## Fully automatic discovery (no input needed)
 
 ```bash

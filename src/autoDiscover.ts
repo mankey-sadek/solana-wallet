@@ -1,5 +1,5 @@
 import { createConnection } from "./solana/connection";
-import { discoverForToken, WalletCandidate } from "./discoverWallets";
+import { discoverForToken, isGoodCandidate, verdictFor, WalletCandidate } from "./discoverWallets";
 
 interface DexScreenerBoostedToken {
   chainId?: string;
@@ -72,8 +72,9 @@ async function main() {
         console.log("  (no active signer wallets found in the sampled window)");
       }
       for (const r of results) {
-        const verdict = r.swapRatio < 0.05 ? "mostly noise" : r.swapRatio < 0.3 ? "usable" : "clean signal";
-        console.log(`  ${r.addr}  ${r.swap}/${r.total} swaps (${(r.swapRatio * 100).toFixed(1)}%) -> ${verdict}`);
+        console.log(
+          `  ${r.addr}  ${r.swap}/${r.total} swaps (${(r.swapRatio * 100).toFixed(1)}%) -> ${verdictFor(r.swapRatio, r.fixedStakeRatio, r.swap)}`
+        );
         all.push(r);
       }
     } catch (err) {
@@ -97,7 +98,7 @@ async function main() {
     }
   }
 
-  const finalists = [...byAddr.values()].filter((r) => r.swapRatio >= 0.1).sort((a, b) => b.swapRatio - a.swapRatio);
+  const finalists = [...byAddr.values()].filter(isGoodCandidate).sort((a, b) => b.swapRatio - a.swapRatio);
 
   console.log("=== Final ranked candidates across all trending tokens ===");
   if (finalists.length === 0) {

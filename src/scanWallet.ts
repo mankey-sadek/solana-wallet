@@ -1,6 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { createConnection } from "./solana/connection";
 import { extractLegs } from "./solana/txParser";
+import { verdictFor, bucketLamports } from "./discoverWallets";
 import { SOL_MINT } from "./types";
 
 type Category = "SWAP" | "TIP_OR_FEE" | "RECEIVED_ONLY" | "NO_CHANGE" | "FAILED" | "UNAVAILABLE";
@@ -38,6 +39,7 @@ async function main() {
     FAILED: 0,
     UNAVAILABLE: 0,
   };
+  const solAmountCounts = new Map<string, number>();
 
   for (const info of sigInfos) {
     const when = info.blockTime ? new Date(info.blockTime * 1000).toLocaleString() : "?";
@@ -72,6 +74,11 @@ async function main() {
 
     if (sold.length > 0 && bought.length > 0) {
       counts.SWAP++;
+      const solLeg = legs.find((l) => l.mint === SOL_MINT);
+      if (solLeg) {
+        const bucket = bucketLamports(solLeg.deltaRaw).toString();
+        solAmountCounts.set(bucket, (solAmountCounts.get(bucket) ?? 0) + 1);
+      }
       console.log(`[${"SWAP".padEnd(13)}] ${when}  ${sigShort}  ${legsSummary(legs)}`);
     } else if (sold.length === 1 && sold[0].mint === SOL_MINT && bought.length === 0) {
       counts.TIP_OR_FEE++;
@@ -101,14 +108,11 @@ async function main() {
   }
 
   const swapRatio = sigInfos.length > 0 ? counts.SWAP / sigInfos.length : 0;
-  console.log(`\nSignal quality: ${(swapRatio * 100).toFixed(1)}% of fetched transactions were real swaps.`);
-  if (swapRatio < 0.05) {
-    console.log("=> Mostly noise (tips/fees/no-ops). NOT a good copy-trading candidate.");
-  } else if (swapRatio < 0.3) {
-    console.log("=> Some noise mixed in, but real trades do happen. Usable, expect some RPC overhead.");
-  } else {
-    console.log("=> Clean signal. Good copy-trading candidate.");
-  }
+  const maxSolAmountCount = Math.max(0, ...solAmountCounts.values());
+  const fixedStakeRatio = counts.SWAP > 0 ? maxSolAmountCount / counts.SWAP : 0;
+  console.log(`\nFixed-stake check: ${(fixedStakeRatio * 100).toFixed(0)}% of its swaps cluster around the same ~0.01 SOL-rounded stake size.`);
+  console.log(`Signal quality: ${(swapRatio * 100).toFixed(1)}% of fetched transactions were real swaps.`);
+  console.log(`=> ${verdictFor(swapRatio, fixedStakeRatio, counts.SWAP)}.`);
 }
 
 main().catch((err) => {

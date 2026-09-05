@@ -12,6 +12,52 @@ export interface WalletStats {
   failed: number;
   unavailable: number;
   swapRatio: number;
+  /**
+   * Share of swaps whose SOL leg is the exact same lamport amount as the single most common one
+   * seen. A human trader sizes each buy differently; a bot spraying a fixed stake across every new
+   * token launch reuses the same amount over and over. High values here are a stronger "not worth
+   * copying" signal than a low swapRatio, since the swaps are real but not discretionary.
+   */
+  fixedStakeRatio: number;
+}
+
+// Bucket SOL amounts to the nearest 0.01 SOL before comparing them: bots that "spray" a fixed stake
+// rarely land on the exact same lamport count twice (slippage, priority fees), but cluster tightly
+// around the same round target (e.g. ~0.1 SOL) - exact-match comparison would miss that pattern.
+const STAKE_BUCKET_LAMPORTS = 10_000_000n;
+
+export function bucketLamports(lamports: bigint): bigint {
+  const abs = lamports < 0n ? -lamports : lamports;
+  return (abs + STAKE_BUCKET_LAMPORTS / 2n) / STAKE_BUCKET_LAMPORTS;
+}
+
+/** Classifies a batch of already-fetched swap legs into the WalletStats shape above. */
+function summarizeLegs(
+  perTx: { sold: import("./types").MintLeg[]; bought: import("./types").MintLeg[] }[]
+): { swap: number; tip: number; received: number; fixedStakeRatio: number } {
+  let swap = 0;
+  let tip = 0;
+  let received = 0;
+  const solAmountBuckets = new Map<string, number>();
+
+  for (const { sold, bought } of perTx) {
+    if (sold.length > 0 && bought.length > 0) {
+      swap++;
+      const solLeg = [...sold, ...bought].find((l) => l.mint === SOL_MINT);
+      if (solLeg) {
+        const bucket = bucketLamports(solLeg.deltaRaw).toString();
+        solAmountBuckets.set(bucket, (solAmountBuckets.get(bucket) ?? 0) + 1);
+      }
+    } else if (sold.length === 1 && sold[0].mint === SOL_MINT && bought.length === 0) {
+      tip++;
+    } else {
+      received++;
+    }
+  }
+
+  const maxCount = Math.max(0, ...solAmountBuckets.values());
+  const fixedStakeRatio = swap > 0 ? maxCount / swap : 0;
+  return { swap, tip, received, fixedStakeRatio };
 }
 
 export interface WalletCandidate extends WalletStats {
@@ -24,12 +70,10 @@ export async function classifyWallet(connection: Connection, address: string, sa
   const pubkey = new PublicKey(address);
   const sigInfos = await connection.getSignaturesForAddress(pubkey, { limit: sampleLimit });
 
-  let swap = 0;
-  let tip = 0;
-  let received = 0;
   let noChange = 0;
   let failed = 0;
   let unavailable = 0;
+  const perTx: { sold: import("./types").MintLeg[]; bought: import("./types").MintLeg[] }[] = [];
 
   for (const info of sigInfos) {
     if (info.err) {
@@ -49,19 +93,15 @@ export async function classifyWallet(connection: Connection, address: string, sa
       noChange++;
       continue;
     }
-    const sold = legs.filter((l) => l.deltaRaw < 0n);
-    const bought = legs.filter((l) => l.deltaRaw > 0n);
-    if (sold.length > 0 && bought.length > 0) {
-      swap++;
-    } else if (sold.length === 1 && sold[0].mint === SOL_MINT && bought.length === 0) {
-      tip++;
-    } else {
-      received++;
-    }
+    perTx.push({
+      sold: legs.filter((l) => l.deltaRaw < 0n),
+      bought: legs.filter((l) => l.deltaRaw > 0n),
+    });
   }
 
+  const { swap, tip, received, fixedStakeRatio } = summarizeLegs(perTx);
   const total = sigInfos.length;
-  return { total, swap, tip, received, noChange, failed, unavailable, swapRatio: total > 0 ? swap / total : 0 };
+  return { total, swap, tip, received, noChange, failed, unavailable, swapRatio: total > 0 ? swap / total : 0, fixedStakeRatio };
 }
 
 /**
@@ -104,8 +144,22 @@ export async function discoverForToken(
   return results;
 }
 
-function verdictFor(swapRatio: number): string {
-  return swapRatio < 0.05 ? "mostly noise" : swapRatio < 0.3 ? "usable" : "clean signal";
+const FIXED_STAKE_WARN_THRESHOLD = 0.2;
+
+export function verdictFor(swapRatio: number, fixedStakeRatio: number, swapCount: number): string {
+  const base = swapRatio < 0.05 ? "mostly noise" : swapRatio < 0.3 ? "usable" : "clean signal";
+  if (swapCount >= 5 && fixedStakeRatio >= FIXED_STAKE_WARN_THRESHOLD) {
+    return (
+      `${base}, BUT ${(fixedStakeRatio * 100).toFixed(0)}% of its swaps cluster around the same SOL ` +
+      "stake size - possible fixed-stake spray bot, not a discretionary trader. Eyeball the trade list before trusting this one."
+    );
+  }
+  return base;
+}
+
+/** Real trading signal, without the strongest fixed-stake spray-bot fingerprint. */
+export function isGoodCandidate(r: WalletStats): boolean {
+  return r.swapRatio >= 0.1 && !(r.swap >= 5 && r.fixedStakeRatio >= FIXED_STAKE_WARN_THRESHOLD);
 }
 
 async function main() {
@@ -134,14 +188,14 @@ async function main() {
   console.log(`\nTop ${results.length} most active wallets on this token, vetted against their own history:\n`);
   for (const r of results) {
     console.log(
-      `${r.addr}\n  seen ${r.mentionCount}x on this token | own history: ${r.swap} SWAP / ${r.total} sampled (${(r.swapRatio * 100).toFixed(1)}%) -> ${verdictFor(r.swapRatio)}\n`
+      `${r.addr}\n  seen ${r.mentionCount}x on this token | own history: ${r.swap} SWAP / ${r.total} sampled (${(r.swapRatio * 100).toFixed(1)}%) -> ${verdictFor(r.swapRatio, r.fixedStakeRatio, r.swap)}\n`
     );
   }
 
-  const best = results.filter((r) => r.swapRatio >= 0.1).sort((a, b) => b.swapRatio - a.swapRatio);
-  console.log("=== Recommended candidates (>=10% of sampled tx were real swaps) ===");
+  const best = results.filter(isGoodCandidate).sort((a, b) => b.swapRatio - a.swapRatio);
+  console.log("=== Recommended candidates (real swaps, not a fixed-stake sniping bot) ===");
   if (best.length === 0) {
-    console.log("None of the top wallets on this token looked like clean traders (mostly bots/tips/noise).");
+    console.log("None of the top wallets on this token looked like clean discretionary traders (mostly bots/tips/noise).");
     console.log("Try a different, less bot-infested token, or increase txSampleSize/topN.");
   } else {
     best.forEach((r, i) => console.log(`${i + 1}. ${r.addr}  (${(r.swapRatio * 100).toFixed(1)}% real swaps)`));
