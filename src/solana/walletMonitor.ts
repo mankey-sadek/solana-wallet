@@ -1,17 +1,17 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { logger } from "../logger";
-import { parseSwapForWallet } from "./txParser";
-import { SwapEvent } from "../types";
+import { parseTradeForWallet } from "./txParser";
+import { TradeEvent } from "../types";
 import { eventLog } from "../state/eventLog";
 
-export type SwapHandler = (event: SwapEvent) => Promise<void>;
+export type TradeHandler = (event: TradeEvent) => Promise<void>;
 
 /**
- * Subscribes to the target wallet's transaction logs over the RPC websocket and forwards
- * detected SOL<->token swaps to `onSwap`. Each signature is processed sequentially to avoid
- * racing overlapping buys/sells against the same position.
+ * Subscribes to the target wallet's transaction logs over the RPC websocket and forwards every
+ * detected balance-changing trade to `onTrade`. Each signature is processed sequentially to avoid
+ * racing overlapping trades against the same position.
  */
-export function watchWallet(connection: Connection, walletAddress: string, onSwap: SwapHandler): number {
+export function watchWallet(connection: Connection, walletAddress: string, onTrade: TradeHandler): number {
   const pubkey = new PublicKey(walletAddress);
   let queue: Promise<void> = Promise.resolve();
 
@@ -23,8 +23,8 @@ export function watchWallet(connection: Connection, walletAddress: string, onSwa
       queue = queue
         .then(async () => {
           try {
-            const event = await parseSwapForWallet(connection, signature, walletAddress);
-            if (event) await onSwap(event);
+            const event = await parseTradeForWallet(connection, signature, walletAddress);
+            if (event) await onTrade(event);
           } catch (err) {
             logger.error(`Failed to process tx ${signature}:`, err);
             eventLog.add("error", `Failed to process tx ${signature}: ${(err as Error).message ?? err}`, {

@@ -16,18 +16,27 @@ Target wallet in this setup (from the gmgn.ai link): `Cw9YHB19L6hdiCBaF9sXPAQNp9
    seconds to cover the race between the two commitment levels. Jupiter's automatic priority fee
    (`prioritizationFeeLamports: "auto"`) is enabled on our own swaps so they land quickly too.
 2. **Parse** (`src/solana/txParser.ts`): for each confirmed transaction, diffs the target wallet's
-   pre/post SOL and SPL-token balances to detect a plain SOL↔token swap (buy or sell). Token↔token or
-   multi-mint transactions are skipped for safety rather than guessed at.
-3. **Size the trade** (`src/trading/copyTrader.ts`): computes what *percentage of its own SOL balance*
-   the target spent on the buy, then applies that same percentage (scaled by `COPY_RATIO`) to your own
-   balance. Example: target spends 10% of its SOL, `COPY_RATIO=0.1` → you spend 1% of yours. Guarded by
-   `MIN_TRADE_SOL` / `MAX_TRADE_SOL` / `RESERVE_SOL`.
+   pre/post SOL and SPL-token balances into a list of "legs" — every asset (native SOL or an SPL token)
+   whose balance changed, negative for what it sold/spent and positive for what it received. A plain
+   SOL↔token swap is just a 2-leg trade; nothing is skipped for touching more than one mint.
+3. **Mirror the trade** (`src/trading/copyTrader.ts`): every trade, however many legs it has, is
+   copied the same way:
+   - For each **sold** leg: if it's SOL, contribute a share of your own SOL balance sized by the same
+     *percentage of balance* the target risked (scaled by `COPY_RATIO` — target spends 10% of its SOL,
+     `COPY_RATIO=0.1` → you spend 1% of yours). If it's a token you hold a copied position in, sell the
+     same proportion of your holdings for SOL. Either way the SOL raised becomes a shared buy budget.
+     A token leg you hold no position for contributes nothing (you can't sell what you never bought).
+   - For each **bought** leg (other than SOL itself): split the buy budget evenly across them and buy
+     each with Jupiter. If nothing was raised (e.g. a token↔token swap in an asset you didn't hold), it
+     falls back to a nominal `MIN_TRADE_SOL` buy so the trade still gets mirrored instead of skipped.
+   - A pure exit to SOL (nothing bought but SOL) needs no buy step — the position is simply closed.
+   All caps still apply: each buy is clamped between `MIN_TRADE_SOL` and `MAX_TRADE_SOL`, and `RESERVE_SOL`
+   is never touched in `live` mode.
 4. **Execute** (`src/trading/executor.ts`): gets a quote and swap transaction from the Jupiter
    aggregator API and, in `live` mode, signs and sends it with your wallet. In `dry-run` mode it only
    fetches the quote and logs what *would* happen.
-5. **Close together**: when the target sells some or all of a token position, the bot computes what
-   proportion of *its* holdings that represents and sells the same proportion of your mirrored position
-   — so a full exit by the target fully closes your position too.
+5. **Close together**: a sold leg you hold a position in is always sold in the same proportion the
+   target sold it in, so a full exit by the target fully closes your matching position too.
 
 Open positions are persisted to `data/positions.json` so the bot survives restarts.
 
@@ -82,8 +91,12 @@ npm run build && npm start
 - **Start in `dry-run`.** Watch the logs for a while and sanity-check the sizing math before switching
   to `MODE=live`.
 - Use a **dedicated wallet** for the bot, funded only with risk capital — never your main wallet's key.
-- This only copies simple SOL↔token swaps. Token↔token swaps, multi-hop routes touching several mints,
-  and non-swap transactions (transfers, staking, NFTs, etc.) are intentionally ignored.
+- Every trade with at least one sold leg and one bought leg is mirrored — SOL↔token, token↔token, and
+  transactions touching several mints at once. A one-sided balance change with nothing on the other
+  side (an airdrop, a fee-only transaction, rent reclaim) has no "trade" to mirror and is skipped. When
+  a bought leg has no sizing basis (you held none of what was sold), it falls back to a nominal
+  `MIN_TRADE_SOL` buy rather than being skipped, so you still end up holding what the target holds —
+  at reduced sizing precision for that leg.
 - The bot uses on-chain data and the public Jupiter aggregator API only. It does not call or depend on
   gmgn.ai in any way — that link was just the source of the target wallet address.
 - Copy trading is inherently risky: you'll always trail the source wallet by at least one confirmation,

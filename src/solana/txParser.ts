@@ -1,5 +1,5 @@
 import { Connection, ParsedTransactionWithMeta, TokenBalance } from "@solana/web3.js";
-import { SwapEvent, SOL_MINT } from "../types";
+import { TradeEvent, MintLeg, SOL_MINT } from "../types";
 import { logger } from "../logger";
 import { eventLog } from "../state/eventLog";
 
@@ -32,7 +32,6 @@ async function fetchConfirmedTransaction(
 
 interface TokenBalanceEntry {
   mint: string;
-  owner?: string;
   amountRaw: bigint;
   decimals: number;
 }
@@ -44,28 +43,28 @@ function extractOwnedBalances(
   const map = new Map<string, TokenBalanceEntry>();
   for (const e of entries ?? []) {
     if (e.owner !== owner) continue;
-    if (e.mint === SOL_MINT) continue; // native SOL is tracked via lamport balances, not wrapped-SOL token accounts
+    if (e.mint === SOL_MINT) continue; // wrapped SOL is tracked via native lamport balances instead
     const prev = map.get(e.mint);
     const amountRaw = BigInt(e.uiTokenAmount.amount);
     if (prev) {
       prev.amountRaw += amountRaw;
     } else {
-      map.set(e.mint, { mint: e.mint, owner, amountRaw, decimals: e.uiTokenAmount.decimals });
+      map.set(e.mint, { mint: e.mint, amountRaw, decimals: e.uiTokenAmount.decimals });
     }
   }
   return map;
 }
 
 /**
- * Fetches and parses a confirmed transaction, looking for a net SOL<->SPL-token swap on `owner`.
- * Returns null if the tx failed, doesn't involve `owner`, or isn't a recognizable single-token swap
- * (e.g. token<->token swaps or multi-hop trades touching several mints are skipped for safety).
+ * Fetches and parses a confirmed transaction into every non-zero balance change ("leg") on `owner`
+ * - native SOL plus any SPL tokens. Returns null only if the tx failed, isn't available, or the
+ * owner had literally no balance change (nothing to copy either way).
  */
-export async function parseSwapForWallet(
+export async function parseTradeForWallet(
   connection: Connection,
   signature: string,
   owner: string
-): Promise<SwapEvent | null> {
+): Promise<TradeEvent | null> {
   const tx = await fetchConfirmedTransaction(connection, signature);
 
   if (!tx) {
@@ -86,56 +85,42 @@ export async function parseSwapForWallet(
 
   const preBalances = tx.meta.preBalances;
   const postBalances = tx.meta.postBalances;
-  let solDeltaLamports = BigInt(postBalances[ownerIndex]) - BigInt(preBalances[ownerIndex]);
+  let solBefore = BigInt(preBalances[ownerIndex]);
+  let solAfter = BigInt(postBalances[ownerIndex]);
   if (ownerIndex === 0) {
-    // fee payer: add the network fee back so the delta reflects only the swap itself
-    solDeltaLamports += BigInt(tx.meta.fee);
+    // fee payer: add the network fee back so the delta reflects only the trade itself
+    solAfter += BigInt(tx.meta.fee);
   }
+  const solDelta = solAfter - solBefore;
 
   const before = extractOwnedBalances(tx.meta.preTokenBalances, owner);
   const after = extractOwnedBalances(tx.meta.postTokenBalances, owner);
-
   const mints = new Set<string>([...before.keys(), ...after.keys()]);
-  const changed = [...mints]
-    .map((mint) => {
-      const b = before.get(mint)?.amountRaw ?? 0n;
-      const a = after.get(mint)?.amountRaw ?? 0n;
-      const decimals = after.get(mint)?.decimals ?? before.get(mint)?.decimals ?? 0;
-      return { mint, before: b, after: a, delta: a - b, decimals };
-    })
-    .filter((m) => m.delta !== 0n);
 
-  if (changed.length === 0) {
-    const msg = `Tx ${signature}: target wallet had no net SPL-token balance change (not a token swap from its perspective); skipping.`;
+  const legs: MintLeg[] = [];
+  if (solDelta !== 0n) {
+    legs.push({ mint: SOL_MINT, decimals: 9, beforeRaw: solBefore, afterRaw: solAfter, deltaRaw: solDelta });
+  }
+  for (const mint of mints) {
+    const b = before.get(mint)?.amountRaw ?? 0n;
+    const a = after.get(mint)?.amountRaw ?? 0n;
+    const decimals = after.get(mint)?.decimals ?? before.get(mint)?.decimals ?? 0;
+    const delta = a - b;
+    if (delta !== 0n) {
+      legs.push({ mint, decimals, beforeRaw: b, afterRaw: a, deltaRaw: delta });
+    }
+  }
+
+  if (legs.length === 0) {
+    const msg = `Tx ${signature}: target wallet had no net balance change; skipping.`;
     logger.info(msg);
     eventLog.add("skip", msg, { signature });
     return null;
   }
 
-  if (changed.length > 1) {
-    const mintList = changed.map((m) => m.mint).join(", ");
-    const msg = `Tx ${signature} touches ${changed.length} token mints (${mintList}) for target wallet; skipping (not a simple SOL<->token swap).`;
-    logger.warn(msg);
-    eventLog.add("skip", msg, { signature, mints: changed.map((m) => m.mint) });
-    return null;
-  }
-
-  const t = changed[0];
-  const side: "buy" | "sell" = t.delta > 0n ? "buy" : "sell";
-
   logger.info(
-    `Parsed swap on tx ${signature}: ${side} ${t.mint}, tokenDelta=${t.delta}, solDeltaLamports=${solDeltaLamports}, preSol=${preBalances[ownerIndex]}`
+    `Parsed trade on tx ${signature}: ${legs.map((l) => `${l.mint}:${l.deltaRaw}`).join(", ")}`
   );
 
-  return {
-    signature,
-    side,
-    tokenMint: t.mint,
-    tokenDecimals: t.decimals,
-    tokenAmountRaw: t.delta > 0n ? t.delta : -t.delta,
-    solAmountLamports: solDeltaLamports > 0n ? solDeltaLamports : -solDeltaLamports,
-    targetSolBalanceBeforeLamports: BigInt(preBalances[ownerIndex]),
-    targetTokenBalanceBeforeRaw: t.before,
-    targetTokenBalanceAfterRaw: t.after,
-  };
+  return { signature, legs };
 }

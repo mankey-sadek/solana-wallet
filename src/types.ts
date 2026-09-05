@@ -18,21 +18,25 @@ export interface AppConfig {
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-/** A buy or sell detected on the target wallet, normalized to SOL <-> token terms. */
-export interface SwapEvent {
+/**
+ * One asset (native SOL or an SPL token) whose balance changed for the target wallet in a
+ * transaction. Native SOL is represented as a leg with mint = SOL_MINT so every trade - SOL<->token,
+ * token<->token, or a transaction touching several mints at once - is just a list of legs with no
+ * special-casing needed for "the" traded pair.
+ */
+export interface MintLeg {
+  mint: string;
+  decimals: number;
+  beforeRaw: bigint;
+  afterRaw: bigint;
+  /** Signed: afterRaw - beforeRaw. Negative = sold/spent, positive = bought/received. */
+  deltaRaw: bigint;
+}
+
+/** A detected transaction on the target wallet with at least one non-zero balance change. */
+export interface TradeEvent {
   signature: string;
-  side: "buy" | "sell";
-  tokenMint: string;
-  tokenDecimals: number;
-  /** Raw token amount (smallest unit) that changed hands on the target wallet. */
-  tokenAmountRaw: bigint;
-  /** SOL involved in the trade, in lamports (spent on a buy, received on a sell). */
-  solAmountLamports: bigint;
-  /** Target wallet's SOL balance immediately before this trade, in lamports. */
-  targetSolBalanceBeforeLamports: bigint;
-  /** Target wallet's balance of tokenMint before/after this trade, raw units. */
-  targetTokenBalanceBeforeRaw: bigint;
-  targetTokenBalanceAfterRaw: bigint;
+  legs: MintLeg[];
 }
 
 export interface OpenPosition {

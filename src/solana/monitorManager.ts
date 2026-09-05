@@ -2,7 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { logger } from "../logger";
 import { eventLog } from "../state/eventLog";
 import { runtimeConfig } from "../state/runtimeConfig";
-import { watchWallet, SwapHandler } from "./walletMonitor";
+import { watchWallet, TradeHandler } from "./walletMonitor";
 
 /**
  * Owns the live logs subscription so the watched wallet can be swapped at runtime (from the
@@ -13,12 +13,12 @@ export class MonitorManager {
   private subscriptionId: number | null = null;
   private currentWallet: string;
 
-  constructor(private connection: Connection, private onSwap: SwapHandler, initialWallet: string) {
+  constructor(private connection: Connection, private onTrade: TradeHandler, initialWallet: string) {
     this.currentWallet = initialWallet;
   }
 
   start(): void {
-    this.subscriptionId = watchWallet(this.connection, this.currentWallet, this.onSwap);
+    this.subscriptionId = watchWallet(this.connection, this.currentWallet, this.onTrade);
   }
 
   get targetWallet(): string {
@@ -44,7 +44,7 @@ export class MonitorManager {
     }
     const previous = this.currentWallet;
     this.currentWallet = normalized;
-    this.subscriptionId = watchWallet(this.connection, normalized, this.onSwap);
+    this.subscriptionId = watchWallet(this.connection, normalized, this.onTrade);
     runtimeConfig.set({ targetWallet: normalized });
 
     logger.info(`Switched target wallet from ${previous} to ${normalized}`);

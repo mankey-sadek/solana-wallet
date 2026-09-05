@@ -33,7 +33,7 @@ async function main() {
     logger.info(`Loaded ${openPositions.length} open position(s) from previous run.`);
   }
 
-  const monitor = new MonitorManager(connection, (event) => copyTrader.onSwap(event), initialTargetWallet);
+  const monitor = new MonitorManager(connection, (event) => copyTrader.onTrade(event), initialTargetWallet);
   monitor.start();
 
   startDashboard(executor, positions, monitor, new Date());
