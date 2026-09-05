@@ -6,6 +6,32 @@ following.
 
 Target wallet in this setup (from the gmgn.ai link): `Cw9YHB19L6hdiCBaF9sXPAQNp9Wr1P9n5MrarZsZhYxC`
 
+## Scanning a wallet before you commit to it
+
+Not every "top trader" wallet is actually worth copying — some are MEV/sniper bots whose own balance
+barely moves, others rack up thousands of unrelated "mentions" (e.g. a pump.fun referral link) that
+would burn through your RPC provider's free quota for nothing. Before pointing the live bot at a
+wallet, check its signal quality cheaply (one RPC call per recent signature, no streaming):
+
+```bash
+npm run scan -- <wallet-address> [limit]
+# e.g.
+npm run scan -- Cw9YHB19L6hdiCBaF9sXPAQNp9Wr1P9n5MrarZsZhYxC 50
+```
+
+It fetches the wallet's last `limit` transactions (default 40) and classifies each one:
+
+- `SWAP` — a real two-sided trade (something sold, something bought). This is what gets copied.
+- `TIP_OR_FEE` — SOL left the wallet with nothing coming back (MEV/Jito tips, plain fees). Never copied.
+- `RECEIVED_ONLY` — tokens/SOL arrived for free (airdrops, referral seeds, dev allocations). Never copied.
+- `NO_CHANGE` — the transaction just mentioned this wallet without affecting its balance at all.
+- `FAILED` / `UNAVAILABLE` — self-explanatory.
+
+It ends with a summary and a verdict (mostly noise / usable / clean signal) based on what fraction of
+transactions were real swaps. A wallet worth copying should show up mostly `SWAP` at a sane frequency
+(e.g. tens per day, not thousands) — that's also roughly how many `getParsedTransaction` calls per day
+the live bot will cost you against your RPC provider's quota if you switch to it.
+
 ## How it works
 
 1. **Monitor** (`src/solana/walletMonitor.ts`): subscribes to the target wallet's transaction logs

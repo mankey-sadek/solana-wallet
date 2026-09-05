@@ -56,32 +56,16 @@ function extractOwnedBalances(
 }
 
 /**
- * Fetches and parses a confirmed transaction into every non-zero balance change ("leg") on `owner`
- * - native SOL plus any SPL tokens. Returns null only if the tx failed, isn't available, or the
- * owner had literally no balance change (nothing to copy either way).
+ * Pure balance-diff logic shared by live monitoring and the offline wallet scanner: turns an
+ * already-fetched transaction into every non-zero balance change ("leg") on `owner` - native SOL
+ * plus any SPL tokens. Returns null only if `owner` isn't one of the transaction's account keys.
  */
-export async function parseTradeForWallet(
-  connection: Connection,
-  signature: string,
-  owner: string
-): Promise<TradeEvent | null> {
-  const tx = await fetchConfirmedTransaction(connection, signature);
-
-  if (!tx) {
-    logger.warn(`Gave up waiting for tx ${signature} to become available at "confirmed" commitment.`);
-    return null;
-  }
-  if (!tx.meta || tx.meta.err) {
-    logger.info(`Tx ${signature} failed on-chain (err=${JSON.stringify(tx?.meta?.err)}); skipping.`);
-    return null;
-  }
+export function extractLegs(tx: ParsedTransactionWithMeta, owner: string): MintLeg[] | null {
+  if (!tx.meta) return null;
 
   const accountKeys = tx.transaction.message.accountKeys;
   const ownerIndex = accountKeys.findIndex((a) => a.pubkey.toBase58() === owner);
-  if (ownerIndex === -1) {
-    logger.warn(`Tx ${signature}: target wallet ${owner} not found in account keys; skipping.`);
-    return null;
-  }
+  if (ownerIndex === -1) return null;
 
   const preBalances = tx.meta.preBalances;
   const postBalances = tx.meta.postBalances;
@@ -109,6 +93,36 @@ export async function parseTradeForWallet(
     if (delta !== 0n) {
       legs.push({ mint, decimals, beforeRaw: b, afterRaw: a, deltaRaw: delta });
     }
+  }
+
+  return legs;
+}
+
+/**
+ * Fetches and parses a confirmed transaction into every non-zero balance change ("leg") on `owner`.
+ * Returns null only if the tx failed, isn't available, or the owner had literally no balance change
+ * (nothing to copy either way).
+ */
+export async function parseTradeForWallet(
+  connection: Connection,
+  signature: string,
+  owner: string
+): Promise<TradeEvent | null> {
+  const tx = await fetchConfirmedTransaction(connection, signature);
+
+  if (!tx) {
+    logger.warn(`Gave up waiting for tx ${signature} to become available at "confirmed" commitment.`);
+    return null;
+  }
+  if (!tx.meta || tx.meta.err) {
+    logger.info(`Tx ${signature} failed on-chain (err=${JSON.stringify(tx?.meta?.err)}); skipping.`);
+    return null;
+  }
+
+  const legs = extractLegs(tx, owner);
+  if (legs === null) {
+    logger.warn(`Tx ${signature}: target wallet ${owner} not found in account keys; skipping.`);
+    return null;
   }
 
   if (legs.length === 0) {
