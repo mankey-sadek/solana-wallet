@@ -2,6 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { logger } from "../logger";
 import { parseSwapForWallet } from "./txParser";
 import { SwapEvent } from "../types";
+import { eventLog } from "../state/eventLog";
 
 export type SwapHandler = (event: SwapEvent) => Promise<void>;
 
@@ -26,6 +27,9 @@ export function watchWallet(connection: Connection, walletAddress: string, onSwa
             if (event) await onSwap(event);
           } catch (err) {
             logger.error(`Failed to process tx ${signature}:`, err);
+            eventLog.add("error", `Failed to process tx ${signature}: ${(err as Error).message ?? err}`, {
+              signature,
+            });
           }
         })
         .catch((err) => logger.error("Unexpected error in swap queue:", err));

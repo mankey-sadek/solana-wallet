@@ -13,6 +13,7 @@ export interface AppConfig {
   minSourceTradeSol: number;
   slippageBps: number;
   jupiterApiUrl: string;
+  dashboardPort: number;
 }
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";

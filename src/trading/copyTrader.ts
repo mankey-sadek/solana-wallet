@@ -2,6 +2,7 @@ import { config } from "../config";
 import { logger } from "../logger";
 import { SwapEvent } from "../types";
 import { PositionStore } from "../state/positionStore";
+import { eventLog } from "../state/eventLog";
 import { Executor } from "./executor";
 
 const LAMPORTS_PER_SOL = 1_000_000_000n;
@@ -19,10 +20,17 @@ export class CopyTrader {
 
   async onSwap(event: SwapEvent): Promise<void> {
     const sourceSol = lamportsToSol(event.solAmountLamports);
+    eventLog.add("swap_detected", `Target ${event.side} ${event.tokenMint} for ${sourceSol.toFixed(4)} SOL`, {
+      signature: event.signature,
+      side: event.side,
+      tokenMint: event.tokenMint,
+      sourceSol,
+    });
+
     if (sourceSol < config.minSourceTradeSol) {
-      logger.info(
-        `Ignoring ${event.side} of ${sourceSol.toFixed(4)} SOL on ${event.tokenMint} (below MIN_SOURCE_TRADE_SOL=${config.minSourceTradeSol})`
-      );
+      const msg = `Ignoring ${event.side} of ${sourceSol.toFixed(4)} SOL on ${event.tokenMint} (below MIN_SOURCE_TRADE_SOL=${config.minSourceTradeSol})`;
+      logger.info(msg);
+      eventLog.add("skip", msg);
       return;
     }
 
@@ -64,10 +72,11 @@ export class CopyTrader {
       ourLamportsToSpend = spendableLamports;
     }
 
+    const ourSolToSpendLog = lamportsToSol(ourLamportsToSpend);
     logger.trade(
       `Target bought ${event.tokenMint} with ${lamportsToSol(event.solAmountLamports).toFixed(4)} SOL ` +
         `(${(sourceRatio * 100).toFixed(2)}% of its balance). ` +
-        `Copying with ${lamportsToSol(ourLamportsToSpend).toFixed(4)} SOL.`
+        `Copying with ${ourSolToSpendLog.toFixed(4)} SOL.`
     );
 
     const result = await this.executor.buy(event.tokenMint, ourLamportsToSpend);
@@ -83,12 +92,20 @@ export class CopyTrader {
       openedAt: existing?.openedAt ?? new Date().toISOString(),
       entrySignature: event.signature,
     });
+
+    eventLog.add(
+      "buy",
+      `${result.executed ? "Bought" : "[dry-run] Would buy"} ${event.tokenMint} with ${ourSolToSpendLog.toFixed(4)} SOL`,
+      { tokenMint: event.tokenMint, solSpent: ourSolToSpendLog, receivedRaw: receivedRaw.toString(), signature: result.signature, executed: result.executed }
+    );
   }
 
   private async handleSell(event: SwapEvent): Promise<void> {
     const position = this.positions.get(event.tokenMint);
     if (!position) {
-      logger.info(`Target sold ${event.tokenMint} but we have no copied position; ignoring.`);
+      const msg = `Target sold ${event.tokenMint} but we have no copied position; ignoring.`;
+      logger.info(msg);
+      eventLog.add("skip", msg);
       return;
     }
 
@@ -113,12 +130,19 @@ export class CopyTrader {
         `Mirroring: selling ${amountToSell} raw units of ours.`
     );
 
-    await this.executor.sell(event.tokenMint, amountToSell);
+    const result = await this.executor.sell(event.tokenMint, amountToSell);
+
+    eventLog.add(
+      "sell",
+      `${result.executed ? "Sold" : "[dry-run] Would sell"} ${(proportion * 100).toFixed(2)}% of our ${event.tokenMint} position`,
+      { tokenMint: event.tokenMint, proportion, amountToSell: amountToSell.toString(), signature: result.signature, executed: result.executed }
+    );
 
     const remaining = ourAmountRaw - amountToSell;
     if (remaining <= 0n || proportion >= 0.999) {
       this.positions.remove(event.tokenMint);
       logger.trade(`Position closed for ${event.tokenMint}.`);
+      eventLog.add("position_closed", `Position closed for ${event.tokenMint}`, { tokenMint: event.tokenMint });
     } else {
       this.positions.upsert({ ...position, ourAmountRaw: remaining.toString() });
     }

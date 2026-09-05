@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Copy-Trading Bot Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131722;
+    --panel-border: #232838;
+    --text: #e6e9f0;
+    --muted: #8b93a7;
+    --green: #3fd68c;
+    --red: #ff5c72;
+    --amber: #ffb648;
+    --blue: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-inline-start: 8px;
+    vertical-align: middle;
+  }
+  .badge.dry-run { background: rgba(91,141,239,0.15); color: var(--blue); }
+  .badge.live { background: rgba(255,92,114,0.15); color: var(--red); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .card .value { font-size: 20px; font-weight: 600; }
+  .card .value.mono { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+  section { margin-bottom: 28px; }
+  section h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: right; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  .mint { font-family: ui-monospace, monospace; font-size: 12px; }
+  .feed { display: flex; flex-direction: column; gap: 6px; max-height: 480px; overflow-y: auto; }
+  .event {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-inline-start: 3px solid var(--muted);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .event.buy { border-inline-start-color: var(--green); }
+  .event.sell { border-inline-start-color: var(--amber); }
+  .event.position_closed { border-inline-start-color: var(--red); }
+  .event.error { border-inline-start-color: var(--red); }
+  .event .msg { flex: 1; }
+  .event .ts { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .type-tag { font-size: 10px; text-transform: uppercase; color: var(--muted); margin-inline-end: 8px; }
+</style>
+</head>
+<body>
+  <h1>Copy-Trading Bot <span id="modeBadge" class="badge dry-run">...</span></h1>
+  <div class="subtitle" id="subtitle">جارٍ التحميل...</div>
+
+  <div class="grid" id="statsGrid"></div>
+
+  <section>
+    <h2>المراكز المفتوحة</h2>
+    <div id="positionsWrap"></div>
+  </section>
+
+  <section>
+    <h2>سجل الأحداث المباشر</h2>
+    <div class="feed" id="feed"></div>
+  </section>
+
+<script>
+  const fmtSol = (n) => (n === null || n === undefined) ? "-" : Number(n).toFixed(4) + " SOL";
+  const short = (s) => s ? s.slice(0, 4) + "..." + s.slice(-4) : "-";
+  const fmtTime = (iso) => new Date(iso).toLocaleTimeString("ar-EG");
+  const fmtUptime = (startedAt) => {
+    const secs = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+    return `${h}س ${m}د ${s}ث`;
+  };
+
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.statusText);
+    return res.json();
+  }
+
+  async function refresh() {
+    try {
+      const [status, positions, events] = await Promise.all([
+        fetchJson("/api/status"),
+        fetchJson("/api/positions"),
+        fetchJson("/api/events?limit=150"),
+      ]);
+      renderStatus(status);
+      renderPositions(positions);
+      renderFeed(events);
+    } catch (err) {
+      document.getElementById("subtitle").textContent = "تعذر الاتصال بالبوت — تأكد إنه لسه شغال.";
+    }
+  }
+
+  function renderStatus(s) {
+    const badge = document.getElementById("modeBadge");
+    badge.textContent = s.mode.toUpperCase();
+    badge.className = "badge " + s.mode;
+
+    document.getElementById("subtitle").textContent =
+      `بيراقب المحفظة ${short(s.targetWallet)} · شغال منذ ${fmtUptime(s.startedAt)}`;
+
+    const cards = [
+      { label: "الوضع", value: s.mode === "live" ? "تنفيذ حقيقي" : "محاكاة (Dry-run)" },
+      { label: "المحفظة المستهدفة", value: short(s.targetWallet), mono: true },
+      { label: "محفظتك", value: s.walletAddress ? short(s.walletAddress) : "غير مفعّلة (dry-run)", mono: true },
+      { label: "رصيدك بالـ SOL", value: fmtSol(s.ourSolBalance) },
+      { label: "نسبة النسخ (COPY_RATIO)", value: s.copyRatio },
+      { label: "حد أدنى/أقصى للصفقة", value: `${s.minTradeSol} - ${s.maxTradeSol} SOL` },
+    ];
+    document.getElementById("statsGrid").innerHTML = cards.map(c => `
+      <div class="card">
+        <div class="label">${c.label}</div>
+        <div class="value ${c.mono ? "mono" : ""}">${c.value}</div>
+      </div>
+    `).join("");
+  }
+
+  function renderPositions(positions) {
+    const wrap = document.getElementById("positionsWrap");
+    if (!positions.length) {
+      wrap.innerHTML = `<div class="empty">مفيش مراكز مفتوحة دلوقتي</div>`;
+      return;
+    }
+    wrap.innerHTML = `
+      <table>
+        <thead><tr><th>Token Mint</th><th>الكمية (raw)</th><th>Decimals</th><th>اتفتحت</th></tr></thead>
+        <tbody>
+          ${positions.map(p => `
+            <tr>
+              <td class="mint">${p.tokenMint}</td>
+              <td>${p.ourAmountRaw}</td>
+              <td>${p.tokenDecimals}</td>
+              <td>${fmtTime(p.openedAt)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function renderFeed(events) {
+    const feed = document.getElementById("feed");
+    if (!events.length) {
+      feed.innerHTML = `<div class="empty">لسه مفيش أحداث</div>`;
+      return;
+    }
+    feed.innerHTML = events.map(e => `
+      <div class="event ${e.type}">
+        <span class="msg"><span class="type-tag">${e.type}</span>${e.message}</span>
+        <span class="ts">${fmtTime(e.ts)}</span>
+      </div>
+    `).join("");
+  }
+
+  refresh();
+  setInterval(refresh, 3000);
+</script>
+</body>
+</html>

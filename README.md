@@ -31,6 +31,18 @@ Target wallet in this setup (from the gmgn.ai link): `Cw9YHB19L6hdiCBaF9sXPAQNp9
 
 Open positions are persisted to `data/positions.json` so the bot survives restarts.
 
+## Web dashboard
+
+While the bot is running (`npm run dev` / `npm start`) it also serves a live monitoring dashboard at
+`http://localhost:3001` (configurable via `DASHBOARD_PORT`). It shows:
+
+- current mode, target wallet, your wallet's SOL balance (in `live` mode), and sizing config
+- open positions (`data/positions.json`) in a table
+- a live feed of detected swaps, copy buys/sells, skips, and errors (polls every 3s)
+
+It's read-only — a way to watch the bot, not control it. Open the URL in any browser on the same
+machine while the bot is running.
+
 ## Setup
 
 ```bash

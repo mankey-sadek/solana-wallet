@@ -37,6 +37,7 @@ function loadConfig(): AppConfig {
     minSourceTradeSol: num("MIN_SOURCE_TRADE_SOL", 0.02),
     slippageBps: num("SLIPPAGE_BPS", 150),
     jupiterApiUrl: (process.env.JUPITER_API_URL ?? "https://quote-api.jup.ag/v6").trim(),
+    dashboardPort: num("DASHBOARD_PORT", 3001),
   };
 
   if (cfg.mode === "live" && !cfg.myWalletPrivateKey) {

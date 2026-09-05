@@ -5,6 +5,7 @@ import { watchWallet } from "./solana/walletMonitor";
 import { Executor } from "./trading/executor";
 import { CopyTrader } from "./trading/copyTrader";
 import { PositionStore } from "./state/positionStore";
+import { startDashboard } from "./web/server";
 
 async function main() {
   logger.info("=== Solana Copy-Trading Bot ===");
@@ -30,6 +31,8 @@ async function main() {
   }
 
   watchWallet(connection, config.targetWallet, (event) => copyTrader.onSwap(event));
+
+  startDashboard(executor, positions, new Date());
 
   logger.info("Listening for target wallet activity... (Ctrl+C to stop)");
 }
