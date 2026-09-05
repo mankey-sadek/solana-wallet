@@ -32,11 +32,30 @@ transactions were real swaps. A wallet worth copying should show up mostly `SWAP
 (e.g. tens per day, not thousands) — that's also roughly how many `getParsedTransaction` calls per day
 the live bot will cost you against your RPC provider's quota if you switch to it.
 
-## Discovering candidate wallets automatically
+## Fully automatic discovery (no input needed)
 
-You don't have to manually browse gmgn.ai's trader profiles one by one. Give the bot a single token's
-contract address (from gmgn's Trending page, for example) and it does the rest — purely from on-chain
-data, no scraping of gmgn.ai:
+```bash
+npm run auto -- [tokenLimit=5] [txSampleSize=40] [topNPerToken=3] [vetSampleSize=12]
+```
+
+Finds candidate wallets completely on its own:
+
+1. Pulls a handful of currently-trending Solana tokens from **DexScreener's public API**
+   (`api.dexscreener.com/token-boosts/...` — documented, free, no key required, not gmgn.ai).
+2. Runs the same discover-and-vet pipeline described below on each one.
+3. Merges the results (a wallet showing up as an active, clean trader across *multiple* trending
+   tokens is a stronger signal) into one final ranked list.
+
+No token address, no wallet address, no manual gmgn.ai browsing required at all. Costs roughly
+`tokenLimit * (txSampleSize + topNPerToken * vetSampleSize)` RPC calls (about 500 with the defaults) -
+turn the numbers down on a tight free-tier quota. Re-run it whenever you want a fresh sweep, since
+trending tokens change fast.
+
+## Discovering candidate wallets from one token
+
+If you'd rather start from a specific token instead of a random trending sweep, give it a single
+token's contract address (from gmgn's Trending page, for example) and it does the rest — purely from
+on-chain data, no scraping of gmgn.ai:
 
 ```bash
 npm run discover -- <token-mint> [txSampleSize=60] [topN=5] [vetSampleSize=15]

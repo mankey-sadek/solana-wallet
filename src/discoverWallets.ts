@@ -3,7 +3,7 @@ import { createConnection } from "./solana/connection";
 import { extractLegs } from "./solana/txParser";
 import { SOL_MINT } from "./types";
 
-interface WalletStats {
+export interface WalletStats {
   total: number;
   swap: number;
   tip: number;
@@ -14,7 +14,13 @@ interface WalletStats {
   swapRatio: number;
 }
 
-async function classifyWallet(connection: Connection, address: string, sampleLimit: number): Promise<WalletStats> {
+export interface WalletCandidate extends WalletStats {
+  addr: string;
+  mentionCount: number;
+  tokenMint: string;
+}
+
+export async function classifyWallet(connection: Connection, address: string, sampleLimit: number): Promise<WalletStats> {
   const pubkey = new PublicKey(address);
   const sigInfos = await connection.getSignaturesForAddress(pubkey, { limit: sampleLimit });
 
@@ -58,27 +64,21 @@ async function classifyWallet(connection: Connection, address: string, sampleLim
   return { total, swap, tip, received, noChange, failed, unavailable, swapRatio: total > 0 ? swap / total : 0 };
 }
 
-async function main() {
-  const tokenMint = process.argv[2];
-  const txSampleSize = Number(process.argv[3]) || 60;
-  const topN = Number(process.argv[4]) || 5;
-  const vetSampleSize = Number(process.argv[5]) || 15;
-
-  if (!tokenMint) {
-    console.error("Usage: npm run discover -- <token-mint> [txSampleSize=60] [topN=5] [vetSampleSize=15]");
-    console.error("Give it any token's contract address (from gmgn's Trending page, for example).");
-    console.error(
-      `Cost: roughly ${60} + ${5 * 15} RPC calls with defaults - tune the numbers down on a tight free-tier quota.`
-    );
-    process.exit(1);
-  }
-
-  const connection = createConnection();
+/**
+ * Finds the wallets most actively trading `tokenMint` (by tallying who signs transactions that
+ * touch it), then vets each one's *own* trade history with `classifyWallet`. Pure - does no
+ * console output - so it can be reused by both the single-token CLI below and the fully-automatic
+ * discovery script.
+ */
+export async function discoverForToken(
+  connection: Connection,
+  tokenMint: string,
+  txSampleSize: number,
+  topN: number,
+  vetSampleSize: number
+): Promise<WalletCandidate[]> {
   const mintPubkey = new PublicKey(tokenMint);
-
-  console.log(`Fetching last ${txSampleSize} signatures touching token ${tokenMint}...`);
   const sigInfos = await connection.getSignaturesForAddress(mintPubkey, { limit: txSampleSize });
-  console.log(`Got ${sigInfos.length}. Finding the most active signer wallets (one RPC call per signature)...\n`);
 
   const freq = new Map<string, number>();
   for (const info of sigInfos) {
@@ -96,23 +96,45 @@ async function main() {
   }
 
   const ranked = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN);
-  if (ranked.length === 0) {
+  const results: WalletCandidate[] = [];
+  for (const [addr, mentionCount] of ranked) {
+    const stats = await classifyWallet(connection, addr, vetSampleSize);
+    results.push({ addr, mentionCount, tokenMint, ...stats });
+  }
+  return results;
+}
+
+function verdictFor(swapRatio: number): string {
+  return swapRatio < 0.05 ? "mostly noise" : swapRatio < 0.3 ? "usable" : "clean signal";
+}
+
+async function main() {
+  const tokenMint = process.argv[2];
+  const txSampleSize = Number(process.argv[3]) || 60;
+  const topN = Number(process.argv[4]) || 5;
+  const vetSampleSize = Number(process.argv[5]) || 15;
+
+  if (!tokenMint) {
+    console.error("Usage: npm run discover -- <token-mint> [txSampleSize=60] [topN=5] [vetSampleSize=15]");
+    console.error("Give it any token's contract address (from gmgn's Trending page, for example).");
+    console.error("Or use `npm run auto` instead - it finds trending tokens by itself, no address needed.");
+    process.exit(1);
+  }
+
+  const connection = createConnection();
+
+  console.log(`Fetching last ${txSampleSize} signatures touching token ${tokenMint}...`);
+  const results = await discoverForToken(connection, tokenMint, txSampleSize, topN, vetSampleSize);
+
+  if (results.length === 0) {
     console.log("No signer wallets found touching this token in the sampled window. Try a bigger txSampleSize.");
     return;
   }
 
-  console.log(`Top ${ranked.length} most active wallets on this token:`);
-  ranked.forEach(([addr, count], i) => console.log(`  ${i + 1}. ${addr} - appeared in ${count} of the sampled tx(s)`));
-
-  console.log(`\nVetting each candidate's own trade history (last ${vetSampleSize} of their own signatures)...\n`);
-
-  const results: (WalletStats & { addr: string; mentionCount: number })[] = [];
-  for (const [addr, mentionCount] of ranked) {
-    const stats = await classifyWallet(connection, addr, vetSampleSize);
-    results.push({ addr, mentionCount, ...stats });
-    const verdict = stats.swapRatio < 0.05 ? "mostly noise" : stats.swapRatio < 0.3 ? "usable" : "clean signal";
+  console.log(`\nTop ${results.length} most active wallets on this token, vetted against their own history:\n`);
+  for (const r of results) {
     console.log(
-      `${addr}\n  seen ${mentionCount}x on this token | own history: ${stats.swap} SWAP / ${stats.total} sampled (${(stats.swapRatio * 100).toFixed(1)}%) -> ${verdict}\n`
+      `${r.addr}\n  seen ${r.mentionCount}x on this token | own history: ${r.swap} SWAP / ${r.total} sampled (${(r.swapRatio * 100).toFixed(1)}%) -> ${verdictFor(r.swapRatio)}\n`
     );
   }
 
@@ -123,11 +145,13 @@ async function main() {
     console.log("Try a different, less bot-infested token, or increase txSampleSize/topN.");
   } else {
     best.forEach((r, i) => console.log(`${i + 1}. ${r.addr}  (${(r.swapRatio * 100).toFixed(1)}% real swaps)`));
-    console.log("\nPlug the top address into the dashboard's \"switch wallet\" field, or set TARGET_WALLET in .env.");
+    console.log('\nPlug the top address into the dashboard\'s "switch wallet" field, or set TARGET_WALLET in .env.');
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
