@@ -37,6 +37,10 @@ export class CopyTrader {
 
     if (soldLegs.length === 0 || boughtLegs.length === 0) {
       // A one-sided balance change (e.g. an airdrop, a fee, rent reclaim) - nothing to mirror as a trade.
+      const summary = trade.legs.map((l) => `${l.deltaRaw > 0n ? "+" : ""}${l.deltaRaw} ${short(l.mint)}`).join(", ");
+      const msg = `Tx ${trade.signature}: one-sided balance change (${summary || "none"}), not a trade; skipping.`;
+      logger.info(msg);
+      eventLog.add("skip", msg, { signature: trade.signature });
       return;
     }
 
