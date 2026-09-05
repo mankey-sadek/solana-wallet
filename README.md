@@ -32,6 +32,26 @@ transactions were real swaps. A wallet worth copying should show up mostly `SWAP
 (e.g. tens per day, not thousands) — that's also roughly how many `getParsedTransaction` calls per day
 the live bot will cost you against your RPC provider's quota if you switch to it.
 
+## Discovering candidate wallets automatically
+
+You don't have to manually browse gmgn.ai's trader profiles one by one. Give the bot a single token's
+contract address (from gmgn's Trending page, for example) and it does the rest — purely from on-chain
+data, no scraping of gmgn.ai:
+
+```bash
+npm run discover -- <token-mint> [txSampleSize=60] [topN=5] [vetSampleSize=15]
+```
+
+1. Fetches recent transactions touching that token and tallies which wallets show up most often as the
+   signer (i.e. the ones actively trading it, not the token's own program/pool accounts).
+2. Takes the `topN` most active wallets and runs each one through the same `SWAP`/`TIP_OR_FEE`/etc.
+   classification as `npm run scan`, against their *own* recent history (not just this one token).
+3. Prints a ranked list of the candidates that came back with a real (non-bot, non-noise) trading
+   signal, ready to paste into the dashboard's "switch wallet" field.
+
+This costs roughly `txSampleSize + topN * vetSampleSize` RPC calls (about 135 with the defaults) — turn
+the numbers down if your RPC provider's free quota is tight.
+
 ## How it works
 
 1. **Monitor** (`src/solana/walletMonitor.ts`): subscribes to the target wallet's transaction logs
