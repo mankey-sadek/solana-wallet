@@ -28,7 +28,7 @@ export class CopyTrader {
     });
 
     if (sourceSol < config.minSourceTradeSol) {
-      const msg = `Ignoring ${event.side} of ${sourceSol.toFixed(4)} SOL on ${event.tokenMint} (below MIN_SOURCE_TRADE_SOL=${config.minSourceTradeSol})`;
+      const msg = `Ignoring ${event.side} of ${sourceSol.toFixed(9)} SOL (${event.solAmountLamports} lamports) on ${event.tokenMint} (below MIN_SOURCE_TRADE_SOL=${config.minSourceTradeSol})`;
       logger.info(msg);
       eventLog.add("skip", msg);
       return;

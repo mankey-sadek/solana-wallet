@@ -1,6 +1,7 @@
 import { Connection, ParsedTransactionWithMeta, TokenBalance } from "@solana/web3.js";
 import { SwapEvent, SOL_MINT } from "../types";
 import { logger } from "../logger";
+import { eventLog } from "../state/eventLog";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,11 +72,17 @@ export async function parseSwapForWallet(
     logger.warn(`Gave up waiting for tx ${signature} to become available at "confirmed" commitment.`);
     return null;
   }
-  if (!tx.meta || tx.meta.err) return null;
+  if (!tx.meta || tx.meta.err) {
+    logger.info(`Tx ${signature} failed on-chain (err=${JSON.stringify(tx?.meta?.err)}); skipping.`);
+    return null;
+  }
 
   const accountKeys = tx.transaction.message.accountKeys;
   const ownerIndex = accountKeys.findIndex((a) => a.pubkey.toBase58() === owner);
-  if (ownerIndex === -1) return null;
+  if (ownerIndex === -1) {
+    logger.warn(`Tx ${signature}: target wallet ${owner} not found in account keys; skipping.`);
+    return null;
+  }
 
   const preBalances = tx.meta.preBalances;
   const postBalances = tx.meta.postBalances;
@@ -98,18 +105,27 @@ export async function parseSwapForWallet(
     })
     .filter((m) => m.delta !== 0n);
 
-  if (changed.length !== 1) {
-    // Not a plain SOL<->token swap (no token change, or a token<->token / multi-leg trade). Skip.
-    if (changed.length > 1) {
-      logger.warn(
-        `Tx ${signature} touches ${changed.length} token mints for target wallet; skipping (not a simple SOL<->token swap).`
-      );
-    }
+  if (changed.length === 0) {
+    const msg = `Tx ${signature}: target wallet had no net SPL-token balance change (not a token swap from its perspective); skipping.`;
+    logger.info(msg);
+    eventLog.add("skip", msg, { signature });
+    return null;
+  }
+
+  if (changed.length > 1) {
+    const mintList = changed.map((m) => m.mint).join(", ");
+    const msg = `Tx ${signature} touches ${changed.length} token mints (${mintList}) for target wallet; skipping (not a simple SOL<->token swap).`;
+    logger.warn(msg);
+    eventLog.add("skip", msg, { signature, mints: changed.map((m) => m.mint) });
     return null;
   }
 
   const t = changed[0];
   const side: "buy" | "sell" = t.delta > 0n ? "buy" : "sell";
+
+  logger.info(
+    `Parsed swap on tx ${signature}: ${side} ${t.mint}, tokenDelta=${t.delta}, solDeltaLamports=${solDeltaLamports}, preSol=${preBalances[ownerIndex]}`
+  );
 
   return {
     signature,
