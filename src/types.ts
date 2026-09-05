@@ -17,6 +17,15 @@ export interface AppConfig {
 }
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
+export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/**
+ * "Anchor" assets: what a trader parks value in between trades. Some traders route everything
+ * through native SOL, others quote and settle in USDC instead. Either is treated as equivalent for
+ * sizing purposes - a sold anchor leg funds our buy budget via the same balance-percentage logic, and
+ * a bought anchor leg means "cashed out", not "buy this for me too".
+ */
+export const ANCHOR_MINTS: readonly string[] = [SOL_MINT, USDC_MINT];
 
 /**
  * One asset (native SOL or an SPL token) whose balance changed for the target wallet in a

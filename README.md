@@ -24,6 +24,10 @@ It fetches the wallet's last `limit` transactions (default 40) and classifies ea
 - `SWAP` — a real two-sided trade (something sold, something bought). This is what gets copied.
 - `TIP_OR_FEE` — SOL left the wallet with nothing coming back (MEV/Jito tips, plain fees). Never copied.
 - `RECEIVED_ONLY` — tokens/SOL arrived for free (airdrops, referral seeds, dev allocations). Never copied.
+- `SENT_ONLY` — something left the wallet (often USDC) with nothing coming back in that same
+  transaction: a fee paid in a token, a transfer out, or one leg of a trade settled across two
+  transactions. Not a freebie (unlike `RECEIVED_ONLY`) and not copied either, since there's no
+  corresponding buy to mirror.
 - `NO_CHANGE` — the transaction just mentioned this wallet without affecting its balance at all.
 - `FAILED` / `UNAVAILABLE` — self-explanatory.
 
@@ -34,9 +38,15 @@ the live bot will cost you against your RPC provider's quota if you switch to it
 
 **Fixed-stake bot check**: a high `SWAP` ratio alone isn't enough — a "spray" bot that buys every new
 token launch with the same stake size produces genuine two-sided swaps too, just not discretionary
-ones. Every scan also buckets each swap's SOL amount to the nearest ~0.01 SOL and flags wallets where
-20%+ of swaps cluster around the same stake size as a likely spray bot rather than a real trader, even
-if its raw swap ratio looks clean.
+ones. Every scan buckets each swap's *anchor* amount (SOL or USDC — whichever side of the trade it
+is, see below) to the nearest ~0.01 of that unit and flags wallets where 20%+ of swaps cluster around
+the same stake size as a likely spray bot rather than a real trader, even if its raw swap ratio looks
+clean.
+
+**USDC-denominated traders**: not everyone trades against SOL — some wallets quote and settle in USDC
+instead (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). Both SOL and USDC are treated as "anchor"
+assets throughout scanning *and* live copying: sizing, the fixed-stake check, and the live bot's
+balance-percentage math all work the same way regardless of which one a wallet actually uses.
 
 ## Fully automatic discovery (no input needed)
 
@@ -92,15 +102,18 @@ the numbers down if your RPC provider's free quota is tight.
    SOL↔token swap is just a 2-leg trade; nothing is skipped for touching more than one mint.
 3. **Mirror the trade** (`src/trading/copyTrader.ts`): every trade, however many legs it has, is
    copied the same way:
-   - For each **sold** leg: if it's SOL, contribute a share of your own SOL balance sized by the same
-     *percentage of balance* the target risked (scaled by `COPY_RATIO` — target spends 10% of its SOL,
-     `COPY_RATIO=0.1` → you spend 1% of yours). If it's a token you hold a copied position in, sell the
-     same proportion of your holdings for SOL. Either way the SOL raised becomes a shared buy budget.
-     A token leg you hold no position for contributes nothing (you can't sell what you never bought).
-   - For each **bought** leg (other than SOL itself): split the buy budget evenly across them and buy
-     each with Jupiter. If nothing was raised (e.g. a token↔token swap in an asset you didn't hold), it
-     falls back to a nominal `MIN_TRADE_SOL` buy so the trade still gets mirrored instead of skipped.
-   - A pure exit to SOL (nothing bought but SOL) needs no buy step — the position is simply closed.
+   - For each **sold** leg: if it's an anchor asset (SOL or USDC — see below), contribute a share of
+     your own SOL balance sized by the same *percentage of balance* the target risked in that asset
+     (scaled by `COPY_RATIO` — target spends 10% of its SOL or USDC, `COPY_RATIO=0.1` → you spend 1%
+     of your SOL). If it's a token you hold a copied position in, sell the same proportion of your
+     holdings for SOL. Either way the SOL raised becomes a shared buy budget. A token leg you hold no
+     position for contributes nothing (you can't sell what you never bought).
+   - For each **bought** leg that isn't an anchor asset: split the buy budget evenly across them and
+     buy each with Jupiter. If nothing was raised (e.g. a token↔token swap in an asset you didn't
+     hold), it falls back to a nominal `MIN_TRADE_SOL` buy so the trade still gets mirrored instead of
+     skipped.
+   - A pure exit to an anchor asset (nothing bought but SOL/USDC) needs no buy step — the position is
+     simply closed.
    All caps still apply: each buy is clamped between `MIN_TRADE_SOL` and `MAX_TRADE_SOL`, and `RESERVE_SOL`
    is never touched in `live` mode.
 4. **Execute** (`src/trading/executor.ts`): gets a quote and swap transaction from the Jupiter

@@ -1,63 +1,78 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { createConnection } from "./solana/connection";
 import { extractLegs } from "./solana/txParser";
-import { SOL_MINT } from "./types";
+import { SOL_MINT, ANCHOR_MINTS } from "./types";
 
 export interface WalletStats {
   total: number;
   swap: number;
   tip: number;
   received: number;
+  sentOnly: number;
   noChange: number;
   failed: number;
   unavailable: number;
   swapRatio: number;
   /**
-   * Share of swaps whose SOL leg is the exact same lamport amount as the single most common one
-   * seen. A human trader sizes each buy differently; a bot spraying a fixed stake across every new
-   * token launch reuses the same amount over and over. High values here are a stronger "not worth
-   * copying" signal than a low swapRatio, since the swaps are real but not discretionary.
+   * Share of swaps whose anchor leg (SOL or USDC - whichever they traded against) rounds to the
+   * same stake size as the single most common one seen. A human trader sizes each buy differently;
+   * a bot spraying a fixed stake across every new token launch reuses the same amount over and over.
+   * High values here are a stronger "not worth copying" signal than a low swapRatio, since the swaps
+   * are real but not discretionary.
    */
   fixedStakeRatio: number;
 }
 
-// Bucket SOL amounts to the nearest 0.01 SOL before comparing them: bots that "spray" a fixed stake
-// rarely land on the exact same lamport count twice (slippage, priority fees), but cluster tightly
-// around the same round target (e.g. ~0.1 SOL) - exact-match comparison would miss that pattern.
-const STAKE_BUCKET_LAMPORTS = 10_000_000n;
+/**
+ * Buckets a raw amount to the nearest "0.01 of its own unit" (0.01 SOL, 0.01 USDC, ...) before
+ * comparing amounts across trades: bots that "spray" a fixed stake rarely land on the exact same
+ * raw amount twice (slippage, priority fees), but cluster tightly around the same round target -
+ * exact-match comparison would miss that pattern entirely.
+ */
+export function bucketAnchorAmount(raw: bigint, decimals: number): bigint {
+  const abs = raw < 0n ? -raw : raw;
+  const bucketSize = 10n ** BigInt(Math.max(decimals - 2, 0));
+  return (abs + bucketSize / 2n) / bucketSize;
+}
 
+/** Kept for backward compatibility where callers specifically mean SOL's 9 decimals. */
 export function bucketLamports(lamports: bigint): bigint {
-  const abs = lamports < 0n ? -lamports : lamports;
-  return (abs + STAKE_BUCKET_LAMPORTS / 2n) / STAKE_BUCKET_LAMPORTS;
+  return bucketAnchorAmount(lamports, 9);
 }
 
 /** Classifies a batch of already-fetched swap legs into the WalletStats shape above. */
 function summarizeLegs(
   perTx: { sold: import("./types").MintLeg[]; bought: import("./types").MintLeg[] }[]
-): { swap: number; tip: number; received: number; fixedStakeRatio: number } {
+): { swap: number; tip: number; received: number; sentOnly: number; fixedStakeRatio: number } {
   let swap = 0;
   let tip = 0;
   let received = 0;
-  const solAmountBuckets = new Map<string, number>();
+  let sentOnly = 0;
+  const anchorAmountBuckets = new Map<string, number>();
 
   for (const { sold, bought } of perTx) {
     if (sold.length > 0 && bought.length > 0) {
       swap++;
-      const solLeg = [...sold, ...bought].find((l) => l.mint === SOL_MINT);
-      if (solLeg) {
-        const bucket = bucketLamports(solLeg.deltaRaw).toString();
-        solAmountBuckets.set(bucket, (solAmountBuckets.get(bucket) ?? 0) + 1);
+      const anchorLeg = [...sold, ...bought].find((l) => ANCHOR_MINTS.includes(l.mint));
+      if (anchorLeg) {
+        const bucket = `${anchorLeg.mint}:${bucketAnchorAmount(anchorLeg.deltaRaw, anchorLeg.decimals)}`;
+        anchorAmountBuckets.set(bucket, (anchorAmountBuckets.get(bucket) ?? 0) + 1);
       }
     } else if (sold.length === 1 && sold[0].mint === SOL_MINT && bought.length === 0) {
       tip++;
-    } else {
+    } else if (sold.length === 0 && bought.length > 0) {
       received++;
+    } else {
+      // Sold something (possibly alongside other sold legs) with nothing coming back in this same
+      // transaction - a fee paid in a token, a transfer out, or one half of a multi-tx settlement.
+      // Not a freebie, so it must not be counted as "received".
+      sentOnly++;
     }
   }
 
-  const maxCount = Math.max(0, ...solAmountBuckets.values());
+  const maxCount = Math.max(0, ...anchorAmountBuckets.values());
   const fixedStakeRatio = swap > 0 ? maxCount / swap : 0;
-  return { swap, tip, received, fixedStakeRatio };
+  return { swap, tip, received, sentOnly, fixedStakeRatio };
 }
 
 export interface WalletCandidate extends WalletStats {
@@ -99,9 +114,20 @@ export async function classifyWallet(connection: Connection, address: string, sa
     });
   }
 
-  const { swap, tip, received, fixedStakeRatio } = summarizeLegs(perTx);
+  const { swap, tip, received, sentOnly, fixedStakeRatio } = summarizeLegs(perTx);
   const total = sigInfos.length;
-  return { total, swap, tip, received, noChange, failed, unavailable, swapRatio: total > 0 ? swap / total : 0, fixedStakeRatio };
+  return {
+    total,
+    swap,
+    tip,
+    received,
+    sentOnly,
+    noChange,
+    failed,
+    unavailable,
+    swapRatio: total > 0 ? swap / total : 0,
+    fixedStakeRatio,
+  };
 }
 
 /**

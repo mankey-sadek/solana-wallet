@@ -1,6 +1,6 @@
 import { config } from "../config";
 import { logger } from "../logger";
-import { MintLeg, TradeEvent, SOL_MINT } from "../types";
+import { MintLeg, TradeEvent, SOL_MINT, ANCHOR_MINTS } from "../types";
 import { PositionStore } from "../state/positionStore";
 import { eventLog } from "../state/eventLog";
 import { Executor } from "./executor";
@@ -15,6 +15,11 @@ function lamportsToSol(lamports: bigint): number {
   return Number(lamports) / Number(LAMPORTS_PER_SOL);
 }
 
+/** Formats a raw amount using its own decimals, for display only (e.g. USDC has 6, not 9). */
+function toDisplayUnits(raw: bigint, decimals: number): string {
+  return (Number(raw) / 10 ** decimals).toFixed(Math.min(decimals, 6));
+}
+
 function clamp(value: bigint, min: bigint, max: bigint): bigint {
   if (value < min) return min;
   if (value > max) return max;
@@ -25,8 +30,10 @@ function clamp(value: bigint, min: bigint, max: bigint): bigint {
  * Mirrors *every* trade the target wallet makes, not just plain SOL<->token swaps: a transaction is
  * a list of "legs" (native SOL plus any SPL tokens whose balance changed). Legs the target sold fund
  * a SOL budget (by selling our matching proportion of that asset, or by scaling our own SOL balance
- * when the sold leg is SOL itself); that budget is then split evenly across whatever they bought.
- * This means token<->token swaps and multi-mint transactions get copied instead of skipped.
+ * when the sold leg is an "anchor" asset - SOL or USDC, see ANCHOR_MINTS - since some traders quote
+ * and settle in USDC instead of SOL); that budget is then split evenly across whatever they bought.
+ * This means token<->token swaps, USDC-denominated trading, and multi-mint transactions all get
+ * copied instead of skipped.
  */
 export class CopyTrader {
   constructor(private executor: Executor, private positions: PositionStore) {}
@@ -74,10 +81,10 @@ export class CopyTrader {
       }
     }
 
-    const tokenBuyLegs = boughtLegs.filter((l) => l.mint !== SOL_MINT);
+    const tokenBuyLegs = boughtLegs.filter((l) => !ANCHOR_MINTS.includes(l.mint));
     if (tokenBuyLegs.length === 0) {
-      // Everything they bought was SOL itself - i.e. a plain sell/exit. Nothing further to buy;
-      // any SOL we freed above just stays in our wallet.
+      // Everything they bought was an anchor asset (SOL or USDC) - i.e. a plain sell/exit or a
+      // cash-out. Nothing further to buy; any SOL we freed above just stays in our wallet.
       return;
     }
 
@@ -122,9 +129,11 @@ export class CopyTrader {
   private async raiseBudgetFromSoldLeg(leg: MintLeg): Promise<bigint> {
     const soldRaw = -leg.deltaRaw;
 
-    if (leg.mint === SOL_MINT) {
+    if (ANCHOR_MINTS.includes(leg.mint)) {
       if (leg.beforeRaw <= 0n) return 0n;
-      // Match the *percentage of balance* the target risked, scaled by our own balance and COPY_RATIO.
+      // Match the *percentage of balance* the target risked in this anchor asset, scaled by our own
+      // SOL balance and COPY_RATIO. The ratio is dimensionless, so this works the same whether they
+      // quote in SOL or USDC - we always execute the resulting budget in SOL either way.
       const sourceRatio = Number(soldRaw) / Number(leg.beforeRaw);
       const ourSolBalance = await this.executor.getSolBalanceLamports();
       // In dry-run without a funded wallet, size against a notional 1 SOL balance so the ratio math
@@ -132,7 +141,7 @@ export class CopyTrader {
       const notionalBalanceLamports = config.mode === "live" ? ourSolBalance : solToLamports(1);
       const contribution = BigInt(Math.round(sourceRatio * config.copyRatio * Number(notionalBalanceLamports)));
       logger.trade(
-        `Target spent ${lamportsToSol(soldRaw).toFixed(4)} SOL (${(sourceRatio * 100).toFixed(2)}% of its balance) -> contributing ${lamportsToSol(contribution).toFixed(4)} SOL to our buy budget.`
+        `Target spent ${toDisplayUnits(soldRaw, leg.decimals)} ${short(leg.mint)} (${(sourceRatio * 100).toFixed(2)}% of its balance) -> contributing ${lamportsToSol(contribution).toFixed(4)} SOL to our buy budget.`
       );
       return clamp(contribution, 0n, solToLamports(config.maxTradeSol));
     }

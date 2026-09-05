@@ -1,10 +1,10 @@
 import { PublicKey } from "@solana/web3.js";
 import { createConnection } from "./solana/connection";
 import { extractLegs } from "./solana/txParser";
-import { verdictFor, bucketLamports } from "./discoverWallets";
-import { SOL_MINT } from "./types";
+import { verdictFor, bucketAnchorAmount } from "./discoverWallets";
+import { SOL_MINT, ANCHOR_MINTS } from "./types";
 
-type Category = "SWAP" | "TIP_OR_FEE" | "RECEIVED_ONLY" | "NO_CHANGE" | "FAILED" | "UNAVAILABLE";
+type Category = "SWAP" | "TIP_OR_FEE" | "RECEIVED_ONLY" | "SENT_ONLY" | "NO_CHANGE" | "FAILED" | "UNAVAILABLE";
 
 function short(mint: string): string {
   return mint.length > 12 ? `${mint.slice(0, 4)}...${mint.slice(-4)}` : mint;
@@ -35,11 +35,12 @@ async function main() {
     SWAP: 0,
     TIP_OR_FEE: 0,
     RECEIVED_ONLY: 0,
+    SENT_ONLY: 0,
     NO_CHANGE: 0,
     FAILED: 0,
     UNAVAILABLE: 0,
   };
-  const solAmountCounts = new Map<string, number>();
+  const anchorAmountCounts = new Map<string, number>();
 
   for (const info of sigInfos) {
     const when = info.blockTime ? new Date(info.blockTime * 1000).toLocaleString() : "?";
@@ -74,18 +75,21 @@ async function main() {
 
     if (sold.length > 0 && bought.length > 0) {
       counts.SWAP++;
-      const solLeg = legs.find((l) => l.mint === SOL_MINT);
-      if (solLeg) {
-        const bucket = bucketLamports(solLeg.deltaRaw).toString();
-        solAmountCounts.set(bucket, (solAmountCounts.get(bucket) ?? 0) + 1);
+      const anchorLeg = legs.find((l) => ANCHOR_MINTS.includes(l.mint));
+      if (anchorLeg) {
+        const bucket = `${anchorLeg.mint}:${bucketAnchorAmount(anchorLeg.deltaRaw, anchorLeg.decimals)}`;
+        anchorAmountCounts.set(bucket, (anchorAmountCounts.get(bucket) ?? 0) + 1);
       }
       console.log(`[${"SWAP".padEnd(13)}] ${when}  ${sigShort}  ${legsSummary(legs)}`);
     } else if (sold.length === 1 && sold[0].mint === SOL_MINT && bought.length === 0) {
       counts.TIP_OR_FEE++;
       console.log(`[${"TIP_OR_FEE".padEnd(13)}] ${when}  ${sigShort}  ${legsSummary(legs)}`);
-    } else {
+    } else if (sold.length === 0 && bought.length > 0) {
       counts.RECEIVED_ONLY++;
       console.log(`[${"RECEIVED_ONLY".padEnd(13)}] ${when}  ${sigShort}  ${legsSummary(legs)} (free/airdrop-like, no cost)`);
+    } else {
+      counts.SENT_ONLY++;
+      console.log(`[${"SENT_ONLY".padEnd(13)}] ${when}  ${sigShort}  ${legsSummary(legs)} (sent out, nothing back in this tx - fee, transfer, or partial settlement)`);
     }
   }
 
@@ -94,6 +98,7 @@ async function main() {
   console.log(`  SWAP (real two-sided trades): ${counts.SWAP}`);
   console.log(`  TIP_OR_FEE (SOL out, nothing in - MEV tips, fees): ${counts.TIP_OR_FEE}`);
   console.log(`  RECEIVED_ONLY (free/airdrop, no cost): ${counts.RECEIVED_ONLY}`);
+  console.log(`  SENT_ONLY (sent out, nothing back in this tx): ${counts.SENT_ONLY}`);
   console.log(`  NO_CHANGE (mentioned wallet but didn't affect it): ${counts.NO_CHANGE}`);
   console.log(`  FAILED: ${counts.FAILED}`);
   console.log(`  UNAVAILABLE: ${counts.UNAVAILABLE}`);
@@ -108,9 +113,9 @@ async function main() {
   }
 
   const swapRatio = sigInfos.length > 0 ? counts.SWAP / sigInfos.length : 0;
-  const maxSolAmountCount = Math.max(0, ...solAmountCounts.values());
-  const fixedStakeRatio = counts.SWAP > 0 ? maxSolAmountCount / counts.SWAP : 0;
-  console.log(`\nFixed-stake check: ${(fixedStakeRatio * 100).toFixed(0)}% of its swaps cluster around the same ~0.01 SOL-rounded stake size.`);
+  const maxAnchorAmountCount = Math.max(0, ...anchorAmountCounts.values());
+  const fixedStakeRatio = counts.SWAP > 0 ? maxAnchorAmountCount / counts.SWAP : 0;
+  console.log(`\nFixed-stake check: ${(fixedStakeRatio * 100).toFixed(0)}% of its swaps cluster around the same stake size (SOL or USDC, rounded to ~0.01 of whichever it traded against).`);
   console.log(`Signal quality: ${(swapRatio * 100).toFixed(1)}% of fetched transactions were real swaps.`);
   console.log(`=> ${verdictFor(swapRatio, fixedStakeRatio, counts.SWAP)}.`);
 }
