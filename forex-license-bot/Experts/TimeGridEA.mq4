@@ -419,7 +419,10 @@ bool IsNewsBlackout()
 }
 
 //+------------------------------------------------------------------+
-//| Placeholder "extreme volatility" guard - flags a spread/ATR spike|
+//| "EVRS" isn't a known standard term - its exact original meaning  |
+//| is unknown, so this is a best-guess stand-in: flags a spread/ATR |
+//| spike (a common proxy for "market just went haywire"). Replace   |
+//| this function's body if you learn what EVRS is meant to check.   |
 //+------------------------------------------------------------------+
 bool IsExtremeVolatility()
 {

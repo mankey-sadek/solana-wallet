@@ -86,7 +86,8 @@ All inputs mirror the settings you described:
 | Basket Target / Stop Loss | `InpBasketTarget`, `InpBasketStopLoss` | Closes all of this EA's open orders on this symbol |
 | Daily Target / Stop Loss | `InpDailyTarget`, `InpDailyStopLoss` | Tracked against equity at day start; locks trading for the rest of the day once hit |
 | Start Triggers | `InpStartTrigger` | `TRIGGER_MANUAL` disables auto entries entirely |
-| Global EVRS / Stoch Protection | `InpGlobalEVRSProtection`, `InpGlobalStochProtection` | Simple spread/ATR spike guard and stochastic overbought/oversold filter |
+| Global EVRS Protection | `InpGlobalEVRSProtection` | "EVRS" isn't a known standard term and its original meaning is unconfirmed - implemented as a best-guess spread/ATR spike guard (`IsExtremeVolatility()`). Adjust or rename if you learn what it should actually check. |
+| Global Stoch Protection | `InpGlobalStochProtection` | Stochastic overbought/oversold filter |
 | News Filter / Auto-Close Before News | `InpNewsFilter`, `InpAutoCloseBeforeNews`, `InpNewsBufferMinutes`, `InpNewsFile` | Reads times from `MQL4/Files/NewsTimes.csv` (one `YYYY.MM.DD HH:MM` per line, broker/server time) - MT4 has no built-in calendar, so populate this file yourself (manually, or export from an economic calendar) |
 | Trend Filter (H4) | `InpTrendFilterH4`, `InpTrendEMAPeriodH4` | Blocks entries against the H4 EMA trend |
 | ATR Filter | `InpATRFilter`, `InpATRPeriod`, `InpATRMinPoints`, `InpATRMaxPoints` | Skips entries when volatility is too low or spiking |
