@@ -1,0 +1,23 @@
+# Sample/test NewsTimes.csv for TimeGridEA's news filter.
+# THESE ARE FAKE PLACEHOLDER TIMES for testing on a demo account only -
+# they do NOT reflect a real economic calendar. Replace every line below
+# with actual high-impact event times before running the EA live.
+#
+# Format: one "YYYY.MM.DD HH:MM" per line, in broker/server time
+# (check what timezone your broker's terminal uses - often GMT/GMT+2/GMT+3).
+# Lines starting with # (like these) are ignored by the EA.
+#
+# Typical high-impact events worth listing here: NFP (Non-Farm Payrolls,
+# 1st Friday of the month), FOMC rate decisions, CPI releases, ECB rate
+# decisions, and any other red-flag news for the symbol you trade.
+
+2026.09.18 18:00
+2026.09.19 12:30
+2026.10.02 12:30
+2026.10.14 12:30
+2026.10.28 18:00
+2026.11.06 12:30
+2026.11.11 12:30
+2026.11.18 12:30
+2026.12.04 12:30
+2026.12.09 18:00

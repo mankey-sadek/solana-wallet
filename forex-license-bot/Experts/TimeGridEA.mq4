@@ -394,7 +394,10 @@ void LoadNewsTimes()
    while(!FileIsEnding(handle))
    {
       string line = FileReadString(handle);
+      StringTrimLeft(line);
+      StringTrimRight(line);
       if(StringLen(line) == 0) continue;
+      if(StringGetCharacter(line, 0) == '#') continue; // comment line
       datetime dt = StringToTime(line);
       if(dt > 0)
       {

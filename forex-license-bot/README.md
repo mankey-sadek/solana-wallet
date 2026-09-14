@@ -14,6 +14,7 @@ forex-license-bot/
   Experts/TimeGridEA.mq4   # the EA
   Include/Sha256.mqh       # SHA-256 / HMAC-SHA256 (pure MQL4, no external libs)
   Include/License.mqh      # license key parsing + validation
+  Files/NewsTimes.csv      # SAMPLE news-blackout times - fake data, for demo testing only
   tools/keygen.py          # generates/verifies license keys from your machine
 ```
 
@@ -22,10 +23,13 @@ forex-license-bot/
 1. Copy `Include/Sha256.mqh` and `Include/License.mqh` into
    `MQL4/Include/` in your MT4 data folder.
 2. Copy `Experts/TimeGridEA.mq4` into `MQL4/Experts/`.
-3. Open MetaEditor, open `TimeGridEA.mq4`, and compile (F7). Fix any
+3. Copy `Files/NewsTimes.csv` into `MQL4/Files/` (only needed if you want to
+   test the News Filter - see below; the EA runs fine without it, it just
+   has nothing to block).
+4. Open MetaEditor, open `TimeGridEA.mq4`, and compile (F7). Fix any
    MetaEditor build warnings for your MT4 build if it flags syntax
    differences (this was written for a modern MQL4 compiler, build 600+).
-4. Attach the EA to a chart, allow live trading / AutoTrading.
+5. Attach the EA to a chart, allow live trading / AutoTrading.
 
 ## License key system
 
@@ -88,7 +92,7 @@ All inputs mirror the settings you described:
 | Start Triggers | `InpStartTrigger` | `TRIGGER_MANUAL` disables auto entries entirely |
 | Global EVRS Protection | `InpGlobalEVRSProtection` | "EVRS" isn't a known standard term and its original meaning is unconfirmed - implemented as a best-guess spread/ATR spike guard (`IsExtremeVolatility()`). Adjust or rename if you learn what it should actually check. |
 | Global Stoch Protection | `InpGlobalStochProtection` | Stochastic overbought/oversold filter |
-| News Filter / Auto-Close Before News | `InpNewsFilter`, `InpAutoCloseBeforeNews`, `InpNewsBufferMinutes`, `InpNewsFile` | Reads times from `MQL4/Files/NewsTimes.csv` (one `YYYY.MM.DD HH:MM` per line, broker/server time) - MT4 has no built-in calendar, so populate this file yourself (manually, or export from an economic calendar) |
+| News Filter / Auto-Close Before News | `InpNewsFilter`, `InpAutoCloseBeforeNews`, `InpNewsBufferMinutes`, `InpNewsFile` | Reads times from `MQL4/Files/NewsTimes.csv` (one `YYYY.MM.DD HH:MM` per line, broker/server time; `#` lines are comments). MT4 has no built-in calendar, so populate this file yourself. `Files/NewsTimes.csv` in this repo is **fake placeholder data for demo testing only** - replace it with real event times (from your broker's calendar or a source like ForexFactory) before trading live |
 | Trend Filter (H4) | `InpTrendFilterH4`, `InpTrendEMAPeriodH4` | Blocks entries against the H4 EMA trend |
 | ATR Filter | `InpATRFilter`, `InpATRPeriod`, `InpATRMinPoints`, `InpATRMaxPoints` | Skips entries when volatility is too low or spiking |
 | Daily Protection | `InpDailyProtection`, `InpDailyProtectionCloseMin`, `InpDailyProtectionOpenMin` | Blocks/closes trades around the daily rollover boundary |
