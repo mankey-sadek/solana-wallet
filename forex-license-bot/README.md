@@ -84,11 +84,12 @@ All inputs mirror the settings you described:
 | Trading symbol | `InpTradeSymbol` | Empty = current chart symbol |
 | EMA Trend Breaker | `InpEnableEMATrendBreaker`, `InpEMATimeframe`, `InpEMAPeriod` | Price vs EMA sets trade direction |
 | Lot sizes | `InpGoldLot`, `InpForexLot`, `InpCryptoLot` | Selected by symbol name (`XAU`/`BTC`/else) |
-| Recovery distance | `InpGoldDistPoints`, `InpForexDistPoints`, `InpCryptoDistPoints` | 0 disables the recovery grid for that asset |
+| Recovery distance | `InpGoldDistPoints`, `InpForexDistPoints`, `InpCryptoDistPoints` | 0 disables the recovery grid for that asset. Gold default (800) is scaled for gold's point size, same reasoning as the ATR filter below |
+| Max recovery levels | `InpMaxGridLevels` | Hard cap on how many grid legs one basket can open (default 3) - caps worst-case exposure per basket regardless of how far price runs |
 | Grid Cooldown | `InpGridCooldownMin` | Minimum minutes between grid additions |
 | Entry Analysis TF | `InpEntryTimeframe` | Used for ATR/stochastic/box calculations |
-| Basket Target / Stop Loss | `InpBasketTarget`, `InpBasketStopLoss` | Closes all of this EA's open orders on this symbol |
-| Daily Target / Stop Loss | `InpDailyTarget`, `InpDailyStopLoss` | Tracked against equity at day start; locks trading for the rest of the day once hit |
+| Basket Target / Stop Loss | `InpBasketTarget`, `InpBasketStopLoss` | Closes all of this EA's open orders on this symbol. Defaults ($20 / $20) size the max loss of one basket cycle to roughly the same as its target |
+| Daily Target / Stop Loss | `InpDailyTarget`, `InpDailyStopLoss` | Tracked against equity at day start; locks trading for the rest of the day once hit. Default daily stop ($100) caps the worst realistic day at 0.1% of a $100k account - tune it to your own account size and risk tolerance |
 | Start Triggers | `InpStartTrigger` | `TRIGGER_MANUAL` disables auto entries entirely |
 | Global EVRS Protection | `InpGlobalEVRSProtection` | "EVRS" isn't a known standard term and its original meaning is unconfirmed - implemented as a best-guess spread/ATR spike guard (`IsExtremeVolatility()`). Adjust or rename if you learn what it should actually check. |
 | Global Stoch Protection | `InpGlobalStochProtection` | Stochastic overbought/oversold filter |

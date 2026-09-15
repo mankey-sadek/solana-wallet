@@ -40,18 +40,18 @@ input double InpForexLot  = 0.05;  // Forex Lot (Pairs)
 input double InpCryptoLot = 0.08;  // Crypto Lot (BTC)
 
 //--------------------------- Recovery / grid ---------------------------
-input int InpGoldDistPoints   = 500; // Gold Dist (Points)
+input int InpGoldDistPoints   = 800; // Gold Dist (Points)
 input int InpForexDistPoints  = 0;   // Forex Dist (Points)
 input int InpCryptoDistPoints = 0;   // Crypto Dist (Points)
 input int InpGridCooldownMin  = 30;  // Grid Cooldown (Min)
-input int InpMaxGridLevels    = 6;   // Max recovery levels per basket (safety cap)
+input int InpMaxGridLevels    = 3;   // Max recovery levels per basket (safety cap)
 
 //--------------------------- General ------------------------------------
 input ENUM_TIMEFRAMES InpEntryTimeframe = PERIOD_M1; // Entry Analysis TF
 input double InpBasketTarget   = 20;   // Basket Target ($)
-input double InpBasketStopLoss = 70;   // Basket Stop Loss ($)
+input double InpBasketStopLoss = 20;   // Basket Stop Loss ($)
 input double InpDailyTarget    = 40;   // Daily Target ($)
-input double InpDailyStopLoss  = 700;  // Daily Stop Loss ($)
+input double InpDailyStopLoss  = 100;  // Daily Stop Loss ($)
 
 enum ENUM_START_TRIGGER
 {
