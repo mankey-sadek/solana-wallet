@@ -109,7 +109,7 @@ int OnInit()
 
    Comment("TimeGridEA licensed to account ", AccountNumber(), " - running.");
    LoadNewsTimes();
-   ResetDailyTrackingIfNeeded();
+   ResetDailyTrackingNow(); // any (re)load - fresh attach or an input change - starts a clean daily baseline
    return(INIT_SUCCEEDED);
 }
 
@@ -353,16 +353,27 @@ void CloseAllBasket(string reason)
 //+------------------------------------------------------------------+
 //| Daily tracking                                                   |
 //+------------------------------------------------------------------+
+void ResetDailyTrackingNow()
+{
+   MqlDateTime t;
+   TimeToStruct(TimeCurrent(), t);
+   g_dayOfYear = t.day_of_year;
+   g_dayStartEquity = AccountEquity();
+   g_dayLocked = false;
+}
+
+// Called every tick to catch the natural midnight rollover. Global variables
+// (g_dayLocked included) survive an input-parameter reinit in MQL4, so
+// OnInit() calls ResetDailyTrackingNow() directly instead of relying on this
+// day-of-year check - otherwise changing an input while still locked out
+// from an earlier daily target/stop-loss hit would silently keep the EA
+// locked for the rest of the calendar day.
 void ResetDailyTrackingIfNeeded()
 {
    MqlDateTime t;
    TimeToStruct(TimeCurrent(), t);
    if(t.day_of_year != g_dayOfYear)
-   {
-      g_dayOfYear = t.day_of_year;
-      g_dayStartEquity = AccountEquity();
-      g_dayLocked = false;
-   }
+      ResetDailyTrackingNow();
 }
 
 bool InDailyProtectionWindow()
