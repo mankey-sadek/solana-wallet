@@ -94,7 +94,7 @@ All inputs mirror the settings you described:
 | Global Stoch Protection | `InpGlobalStochProtection` | Stochastic overbought/oversold filter |
 | News Filter / Auto-Close Before News | `InpNewsFilter`, `InpAutoCloseBeforeNews`, `InpNewsBufferMinutes`, `InpNewsFile` | Reads times from `MQL4/Files/NewsTimes.csv` (one `YYYY.MM.DD HH:MM` per line, broker/server time; `#` lines are comments). MT4 has no built-in calendar, so populate this file yourself. `Files/NewsTimes.csv` in this repo is **fake placeholder data for demo testing only** - replace it with real event times (from your broker's calendar or a source like ForexFactory) before trading live |
 | Trend Filter (H4) | `InpTrendFilterH4`, `InpTrendEMAPeriodH4` | Blocks entries against the H4 EMA trend |
-| ATR Filter | `InpATRFilter`, `InpATRPeriod`, `InpATRMinPoints`, `InpATRMaxPoints` | Skips entries when volatility is too low or spiking |
+| ATR Filter | `InpATRFilter`, `InpATRPeriod`, `InpATRMinPoints`, `InpATRMaxPoints` | Skips entries when volatility is too low or spiking. Defaults (300-3000 points) are scaled for gold (XAUUSD moves in much larger points than forex pairs) - if you attach this to a forex pair, lower them back toward 30-400 |
 | Daily Protection | `InpDailyProtection`, `InpDailyProtectionCloseMin`, `InpDailyProtectionOpenMin` | Blocks/closes trades around the daily rollover boundary |
 
 ## Before running live

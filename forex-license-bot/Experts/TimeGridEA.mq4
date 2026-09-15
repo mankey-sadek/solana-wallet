@@ -40,7 +40,7 @@ input double InpForexLot  = 0.05;  // Forex Lot (Pairs)
 input double InpCryptoLot = 0.08;  // Crypto Lot (BTC)
 
 //--------------------------- Recovery / grid ---------------------------
-input int InpGoldDistPoints   = 0;   // Gold Dist (Points)
+input int InpGoldDistPoints   = 500; // Gold Dist (Points)
 input int InpForexDistPoints  = 0;   // Forex Dist (Points)
 input int InpCryptoDistPoints = 0;   // Crypto Dist (Points)
 input int InpGridCooldownMin  = 30;  // Grid Cooldown (Min)
@@ -77,8 +77,8 @@ input int  InpTrendEMAPeriodH4 = 50;
 
 input bool InpATRFilter      = true; // ATR Filter
 input int  InpATRPeriod      = 14;
-input double InpATRMinPoints = 30;   // below this = too quiet, skip
-input double InpATRMaxPoints = 400;  // above this = too wild (news spike), skip
+input double InpATRMinPoints = 300;  // below this = too quiet, skip (gold-scale points, not forex pips)
+input double InpATRMaxPoints = 3000; // above this = too wild (news spike), skip (gold-scale points, not forex pips)
 
 input bool InpDailyProtection        = false; // Daily Protection
 input int  InpDailyProtectionCloseMin = 30;   // Close(-min) before daily boundary
